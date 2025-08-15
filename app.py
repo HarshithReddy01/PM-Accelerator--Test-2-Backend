@@ -35,7 +35,10 @@ GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY')
 GOOGLE_PLACES_API_KEY = os.getenv('GOOGLE_PLACES_API_KEY')
 
 # OpenWeather API Key
-OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', 'ec784b133d32aafc9a94a859ab777fa5')
+OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
+
+# YouTube API Key
+YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
 
 # API Base URLs
 OPENWEATHER_BASE_URL = "https://api.openweathermap.org/data/2.5"
@@ -99,6 +102,9 @@ def validate_location(location):
 
 def get_weather_data(lat, lon, start_date, end_date):
     """Fetch weather data for a location and date range using OpenWeather API"""
+    if not OPENWEATHER_API_KEY:
+        return None, "OpenWeather API key not configured"
+    
     try:
         
         # Get current weather
@@ -196,10 +202,67 @@ def get_weather_data(lat, lon, start_date, end_date):
     except Exception as e:
         return None, str(e)
 
+def get_hourly_weather_data(lat, lon):
+    """Fetch hourly weather data using OpenWeather One Call API 2.5"""
+    if not OPENWEATHER_API_KEY:
+        return None, "OpenWeather API key not configured"
+    
+    try:
+        # Use OpenWeather One Call API 2.5 for hourly forecasts
+        hourly_response = requests.get(
+            "https://api.openweathermap.org/data/2.5/onecall",
+            params={
+                'lat': lat,
+                'lon': lon,
+                'appid': OPENWEATHER_API_KEY,
+                'units': 'metric',
+                'exclude': 'current,minutely,daily,alerts'
+            }
+        )
+        
+        if hourly_response.status_code != 200:
+            return None, f"OpenWeather One Call API error: {hourly_response.status_code}"
+        
+        hourly_data = hourly_response.json()
+        
+        # Process hourly data
+        hourly_list = []
+        for hour_data in hourly_data.get('hourly', []):
+            timestamp = hour_data.get('dt')
+            if timestamp:
+                hourly_datetime = datetime.fromtimestamp(timestamp)
+                hourly_item = {
+                    'dt': int(hourly_datetime.timestamp()),
+                    'temp': hour_data.get('temp'),
+                    'feels_like': hour_data.get('feels_like'),
+                    'pressure': hour_data.get('pressure'),
+                    'humidity': hour_data.get('humidity'),
+                    'dew_point': hour_data.get('dew_point'),
+                    'uvi': hour_data.get('uvi'),
+                    'clouds': hour_data.get('clouds'),
+                    'visibility': hour_data.get('visibility'),
+                    'wind_speed': hour_data.get('wind_speed'),
+                    'wind_deg': hour_data.get('wind_deg'),
+                    'wind_gust': hour_data.get('wind_gust'),
+                    'weather': hour_data.get('weather', []),
+                    'pop': hour_data.get('pop'),
+                    'dt_txt': hourly_datetime.strftime('%Y-%m-%d %H:%M:%S')
+                }
+                hourly_list.append(hourly_item)
+        
+        return {
+            'hourly': hourly_list,
+            'timezone': hourly_data.get('timezone'),
+            'timezone_offset': hourly_data.get('timezone_offset'),
+            'note': 'Using OpenWeather One Call API 2.5 for hourly forecasts'
+        }, None
+        
+    except Exception as e:
+        return None, str(e)
+
 def get_youtube_videos(location, max_results=3):
     """Get YouTube videos for the location"""
-    youtube_api_key = os.getenv('YOUTUBE_API_KEY')
-    if not youtube_api_key:
+    if not YOUTUBE_API_KEY:
         return None, "YouTube API key not configured"
     
     try:
@@ -211,7 +274,7 @@ def get_youtube_videos(location, max_results=3):
                 'q': search_query,
                 'type': 'video',
                 'maxResults': max_results,
-                'key': youtube_api_key,
+                'key': YOUTUBE_API_KEY,
                 'order': 'relevance',
                 'videoDuration': 'short'
             },
@@ -269,8 +332,7 @@ def get_google_maps_data(location):
 
 def get_nearby_places(lat, lon, place_type, max_results=5):
     """Get nearby places using Google Places API - optimized for performance"""
-    places_api_key = os.getenv('GOOGLE_PLACES_API_KEY')
-    if not places_api_key:
+    if not GOOGLE_PLACES_API_KEY:
         return None, "Google Places API key not configured"
     
     try:
@@ -281,7 +343,7 @@ def get_nearby_places(lat, lon, place_type, max_results=5):
                 'location': f"{lat},{lon}",
                 'rankby': 'distance',
                 'type': place_type,
-                'key': places_api_key
+                'key': GOOGLE_PLACES_API_KEY
             }
         )
         
@@ -308,7 +370,7 @@ def get_nearby_places(lat, lon, place_type, max_results=5):
                             params={
                                 'place_id': place_id,
                                 'fields': 'formatted_address,formatted_phone_number,opening_hours,website,price_level,photos',
-                                'key': places_api_key
+                                'key': GOOGLE_PLACES_API_KEY
                             }
                         )
                         
@@ -350,8 +412,7 @@ def get_nearby_places(lat, lon, place_type, max_results=5):
 
 def get_place_photo(photo_reference, max_width=400):
     """Get place photo using Google Places Photo API"""
-    places_api_key = os.getenv('GOOGLE_PLACES_API_KEY')
-    if not places_api_key:
+    if not GOOGLE_PLACES_API_KEY:
         return None, "Google Places API key not configured"
     
     try:
@@ -359,11 +420,11 @@ def get_place_photo(photo_reference, max_width=400):
         params = {
             'maxwidth': max_width,
             'photo_reference': photo_reference,
-            'key': places_api_key
+            'key': GOOGLE_PLACES_API_KEY
         }
         
         # Return the photo URL
-        return f"{photo_url}?maxwidth={max_width}&photo_reference={photo_reference}&key={places_api_key}", None
+        return f"{photo_url}?maxwidth={max_width}&photo_reference={photo_reference}&key={GOOGLE_PLACES_API_KEY}", None
     except Exception as e:
         return None, str(e)
 
@@ -724,6 +785,107 @@ def get_place_details_endpoint(place_id):
                 return jsonify({'error': f"Place details error: {details_data['status']}"}), 500
         else:
             return jsonify({'error': f"Google Places API error: {details_response.status_code}"}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/hourly', methods=['POST'])
+def create_hourly_forecast():
+    """Create hourly forecast for a location"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        location = data.get('location')
+        date = data.get('date', datetime.now().strftime('%Y-%m-%d'))
+        
+        if not location:
+            return jsonify({'error': 'Location is required'}), 400
+        
+        # Validate location
+        is_valid_location, location_result = validate_location(location)
+        if not is_valid_location:
+            return jsonify({'error': location_result}), 400
+        
+        lat, lon = location_result['latitude'], location_result['longitude']
+        
+        # Get hourly weather data
+        hourly_data, hourly_error = get_hourly_weather_data(lat, lon)
+        if hourly_error:
+            return jsonify({'error': hourly_error}), 500
+        
+        # Create database record
+        new_record = WeatherRecord(
+            location=location,
+            latitude=lat,
+            longitude=lon,
+            start_date=datetime.strptime(date, '%Y-%m-%d').date(),
+            end_date=datetime.strptime(date, '%Y-%m-%d').date(),
+            temperature_data={'hourly_forecast': hourly_data}
+        )
+        
+        db.session.add(new_record)
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Hourly forecast created successfully',
+            'id': new_record.id,
+            'location': location,
+            'date': date,
+            'hourly_forecast': hourly_data
+        }), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/hourly/<int:record_id>', methods=['GET'])
+def get_hourly_forecast(record_id):
+    """Get hourly forecast for a specific record"""
+    try:
+        record = WeatherRecord.query.get(record_id)
+        
+        if not record:
+            return jsonify({'error': 'Record not found'}), 404
+        
+        date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
+        
+        # Get fresh hourly data
+        hourly_data, hourly_error = get_hourly_weather_data(record.latitude, record.longitude)
+        if hourly_error:
+            return jsonify({'error': hourly_error}), 500
+        
+        return jsonify({
+            'location': record.location,
+            'date': date,
+            'hourly_forecast': hourly_data
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/hourly/direct', methods=['GET'])
+def get_hourly_forecast_direct():
+    """Get hourly forecast directly for coordinates"""
+    try:
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        
+        if not lat or not lon:
+            return jsonify({'error': 'Latitude and longitude are required'}), 400
+        
+        # Get hourly weather data
+        hourly_data, hourly_error = get_hourly_weather_data(lat, lon)
+        if hourly_error:
+            return jsonify({'error': hourly_error}), 500
+        
+        return jsonify({
+            'latitude': lat,
+            'longitude': lon,
+            'hourly_forecast': hourly_data
+        }), 200
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
