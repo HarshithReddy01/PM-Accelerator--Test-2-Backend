@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import requests
 import json
 import csv
+import io
 import xml.etree.ElementTree as ET
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
@@ -273,9 +274,7 @@ def get_nearby_places(lat, lon, place_type, max_results=5):
         return None, "Google Places API key not configured"
     
     try:
-
-        
-        # Nearby Search API - get more results initially to sort by rating
+        # Use legacy API but with optimized fields to get photos in one call
         nearby_response = requests.get(
             f"{GOOGLE_PLACES_BASE_URL}/nearbysearch/json",
             params={
@@ -290,7 +289,6 @@ def get_nearby_places(lat, lon, place_type, max_results=5):
             nearby_data = nearby_response.json()
             if nearby_data['status'] == 'OK':
                 places = nearby_data.get('results', [])
-        
                 
                 # Filter places with ratings and sort by number of reviews (highest first)
                 rated_places = [p for p in places if p.get('rating') is not None and p.get('user_ratings_total', 0) > 0]
@@ -298,14 +296,13 @@ def get_nearby_places(lat, lon, place_type, max_results=5):
                 
                 # Take top 5 by rating
                 top_places = rated_places[:max_results]
-        
                 
-                # Enrich places with additional details (only for top 5)
+                # Get additional details for top places (including photos)
                 enriched_places = []
                 for place in top_places:
                     place_id = place.get('place_id')
                     if place_id:
-                        # Get place details with minimal fields for faster response
+                        # Get place details with photos
                         details_response = requests.get(
                             f"{GOOGLE_PLACES_BASE_URL}/details/json",
                             params={
@@ -343,14 +340,12 @@ def get_nearby_places(lat, lon, place_type, max_results=5):
                             # Use basic info if details request fails
                             enriched_places.append(place)
                 
-        
                 return enriched_places, None
             else:
                 return None, f"Nearby search error: {nearby_data['status']}"
         else:
             return None, f"Google Places API error: {nearby_response.status_code}"
     except Exception as e:
-
         return None, str(e)
 
 def get_place_photo(photo_reference, max_width=400):
@@ -672,19 +667,36 @@ def get_nearby_places_endpoint(place_type):
 
 @app.route('/api/places/photo')
 def get_place_photo_endpoint():
-    """Get place photo URL"""
+    """Get place photo URL - supports both legacy and new API v1"""
     try:
         photo_reference = request.args.get('photo_reference')
+        photo_name = request.args.get('photo_name')  # For new API v1
         max_width = request.args.get('max_width', 400, type=int)
         
-        if not photo_reference:
-            return jsonify({'error': 'Photo reference is required'}), 400
+        if not photo_reference and not photo_name:
+            return jsonify({'error': 'Photo reference or photo name is required'}), 400
         
-        photo_url, error = get_place_photo(photo_reference, max_width)
-        if error:
-            return jsonify({'error': error}), 500
+        if photo_name:
+            # Use new API v1
+            photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?maxWidthPx={max_width}&key={GOOGLE_PLACES_API_KEY}"
+        else:
+            # Use legacy API
+            photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth={max_width}&photo_reference={photo_reference}&key={GOOGLE_PLACES_API_KEY}"
         
-        return jsonify({'photo_url': photo_url}), 200
+        # Proxy the image through our backend to avoid CORS issues
+        try:
+            response = requests.get(photo_url, stream=True)
+            if response.status_code == 200:
+                return send_file(
+                    io.BytesIO(response.content),
+                    mimetype=response.headers.get('content-type', 'image/jpeg'),
+                    as_attachment=False
+                )
+            else:
+                return jsonify({'error': f'Photo API error: {response.status_code}'}), 500
+        except Exception as e:
+            return jsonify({'error': f'Failed to fetch photo: {str(e)}'}), 500
+            
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
