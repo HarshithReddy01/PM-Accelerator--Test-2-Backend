@@ -31,14 +31,14 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 db = SQLAlchemy(app)
 
 # Google Maps Platform API Keys
-GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY', 'AIzaSyC8NNc6iPON3Tz-JXmptSdYBGYH78qEu1c')
-GOOGLE_PLACES_API_KEY = os.getenv('GOOGLE_PLACES_API_KEY', 'AIzaSyBbEAsjKRSlN87NIOuZPGVefUhVEZIfAkA')
+GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY')
+GOOGLE_PLACES_API_KEY = os.getenv('GOOGLE_PLACES_API_KEY')
 
 # OpenWeather API Key
-OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', 'ec784b133d32aafc9a94a859ab777fa5')
+OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
 
 # YouTube API Key
-YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY', 'AIzaSyBORTyq9ouFG0kd8rYXw6cH4KTFeI8U9-8')
+YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
 
 # API Base URLs
 OPENWEATHER_BASE_URL = "https://api.openweathermap.org/data/2.5"
@@ -102,6 +102,9 @@ def validate_location(location):
 
 def get_weather_data(lat, lon, start_date, end_date):
     """Fetch weather data for a location and date range using OpenWeather API"""
+    if not OPENWEATHER_API_KEY:
+        return None, "OpenWeather API key not configured"
+    
     try:
         
         # Get current weather
@@ -201,6 +204,9 @@ def get_weather_data(lat, lon, start_date, end_date):
 
 def get_hourly_weather_data(lat, lon):
     """Fetch hourly weather data using OpenWeather One Call API 2.5"""
+    if not OPENWEATHER_API_KEY:
+        return None, "OpenWeather API key not configured"
+    
     try:
         # Use OpenWeather One Call API 2.5 for hourly forecasts
         hourly_response = requests.get(
