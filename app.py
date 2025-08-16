@@ -124,6 +124,7 @@ def get_weather_data(lat, lon, start_date, end_date):
         current_data = current_response.json()
 
         # Get 5-day forecast (OpenWeather provides 3-hour intervals for 5 days)
+        # Try multiple approaches to get maximum data
         forecast_response = requests.get(
             f"{OPENWEATHER_BASE_URL}/forecast",
             params={
@@ -134,10 +135,49 @@ def get_weather_data(lat, lon, start_date, end_date):
             }
         )
         
+        # If the first request doesn't give enough data, try with cnt parameter
+        if forecast_response.status_code == 200:
+            forecast_data = forecast_response.json()
+            if len(forecast_data.get('list', [])) < 40:
+                print(f"First request returned {len(forecast_data.get('list', []))} items, trying with cnt parameter...")
+                # Try again with cnt parameter to get maximum data points
+                forecast_response = requests.get(
+                    f"{OPENWEATHER_BASE_URL}/forecast",
+                    params={
+                        'lat': lat,
+                        'lon': lon,
+                        'appid': OPENWEATHER_API_KEY,
+                        'units': 'metric',
+                        'cnt': 40  # Request maximum data points
+                    }
+                )
+        
         if forecast_response.status_code != 200:
             return None, f"OpenWeather API forecast error: {forecast_response.status_code}"
         
         forecast_data = forecast_response.json()
+        
+        # Debug: Log the forecast data structure
+        print(f"OpenWeather API response - Total forecast items: {len(forecast_data.get('list', []))}")
+        if forecast_data.get('list'):
+            first_item = forecast_data['list'][0]
+            last_item = forecast_data['list'][-1]
+            print(f"First forecast: {first_item.get('dt_txt')} - {datetime.fromtimestamp(first_item.get('dt'))}")
+            print(f"Last forecast: {last_item.get('dt_txt')} - {datetime.fromtimestamp(last_item.get('dt'))}")
+            
+            # Check if we have enough data for 5 days
+            forecast_dates = set()
+            for item in forecast_data.get('list', []):
+                forecast_date = datetime.fromtimestamp(item.get('dt')).date()
+                forecast_dates.add(forecast_date)
+            
+            print(f"Unique forecast dates available: {len(forecast_dates)}")
+            print(f"Available dates: {sorted(forecast_dates)}")
+            
+            # Log the available dates for debugging
+            print(f"Available forecast dates: {sorted(forecast_dates)}")
+            if len(forecast_dates) < 6:
+                print(f"Warning: Only {len(forecast_dates)} unique dates available, may not have enough data for 5-day forecast")
 
         # Convert OpenWeather API format to our expected format
         current_weather = {
@@ -255,6 +295,187 @@ def get_hourly_weather_data(lat, lon):
             'timezone': hourly_data.get('timezone'),
             'timezone_offset': hourly_data.get('timezone_offset'),
             'note': 'Using OpenWeather One Call API 2.5 for hourly forecasts'
+        }, None
+        
+    except Exception as e:
+        return None, str(e)
+
+def get_most_descriptive_weather(forecasts):
+    """Get the most descriptive weather condition from forecasts"""
+    if not forecasts:
+        return None
+    
+    # Count weather descriptions
+    weather_counts = {}
+    for forecast in forecasts:
+        description = forecast.get('weather_description', '').lower()
+        if description:
+            # Skip generic terms like 'clouds', 'clear' and prefer more descriptive ones
+            if description not in ['clouds', 'clear', 'overcast']:
+                weather_counts[description] = weather_counts.get(description, 0) + 1
+    
+    # If no descriptive weather found, look for the most common weather_main
+    if not weather_counts:
+        main_counts = {}
+        for forecast in forecasts:
+            main = forecast.get('weather_main', '').lower()
+            if main:
+                main_counts[main] = main_counts.get(main, 0) + 1
+        
+        if main_counts:
+            most_common = max(main_counts, key=main_counts.get)
+            # Convert to more user-friendly terms
+            weather_map = {
+                'clear': 'Sunny',
+                'clouds': 'Partly Cloudy',
+                'rain': 'Rainy',
+                'snow': 'Snowy',
+                'thunderstorm': 'Stormy',
+                'drizzle': 'Light Rain',
+                'mist': 'Misty',
+                'fog': 'Foggy',
+                'haze': 'Hazy'
+            }
+            return weather_map.get(most_common, most_common.title())
+    
+    # Return the most common descriptive weather
+    if weather_counts:
+        most_common = max(weather_counts, key=weather_counts.get)
+        return most_common.title()
+    
+    return None
+
+def get_todays_weather_3hour(lat, lon):
+    """Fetch today's weather data with 3-hour intervals using OpenWeather free forecast API"""
+    if not OPENWEATHER_API_KEY:
+        return None, "OpenWeather API key not configured"
+    
+    try:
+        # Get current weather
+        current_response = requests.get(
+            f"{OPENWEATHER_BASE_URL}/weather",
+            params={
+                'lat': lat,
+                'lon': lon,
+                'appid': OPENWEATHER_API_KEY,
+                'units': 'metric'
+            }
+        )
+        
+        if current_response.status_code != 200:
+            return None, f"OpenWeather API current weather error: {current_response.status_code}"
+        
+        current_data = current_response.json()
+
+        # Get 5-day forecast (3-hour intervals) - this is the free API
+        forecast_response = requests.get(
+            f"{OPENWEATHER_BASE_URL}/forecast",
+            params={
+                'lat': lat,
+                'lon': lon,
+                'appid': OPENWEATHER_API_KEY,
+                'units': 'metric'
+            }
+        )
+        
+        if forecast_response.status_code != 200:
+            return None, f"OpenWeather API forecast error: {forecast_response.status_code}"
+        
+        forecast_data = forecast_response.json()
+
+        # Get today's date
+        today = datetime.now().date()
+        
+        # Filter forecast data for today only
+        todays_forecasts = []
+        for forecast_item in forecast_data.get('list', []):
+            timestamp = forecast_item.get('dt')
+            if timestamp:
+                forecast_datetime = datetime.fromtimestamp(timestamp)
+                if forecast_datetime.date() == today:
+                    todays_forecasts.append({
+                        'time': forecast_datetime.strftime('%H:%M'),
+                        'datetime': forecast_datetime.isoformat(),
+                        'timestamp': timestamp,
+                        'temperature': forecast_item.get('main', {}).get('temp'),
+                        'feels_like': forecast_item.get('main', {}).get('feels_like'),
+                        'humidity': forecast_item.get('main', {}).get('humidity'),
+                        'pressure': forecast_item.get('main', {}).get('pressure'),
+                        'weather_main': forecast_item.get('weather', [{}])[0].get('main'),
+                        'weather_description': forecast_item.get('weather', [{}])[0].get('description'),
+                        'weather_icon': forecast_item.get('weather', [{}])[0].get('icon'),
+                        'wind_speed': forecast_item.get('wind', {}).get('speed'),
+                        'wind_deg': forecast_item.get('wind', {}).get('deg'),
+                        'clouds': forecast_item.get('clouds', {}).get('all'),
+                        'pop': forecast_item.get('pop', 0),  # Probability of precipitation
+                        'visibility': forecast_item.get('visibility', 0)
+                    })
+
+        # Sort by time
+        todays_forecasts.sort(key=lambda x: x['timestamp'])
+
+        # Current weather data
+        current_weather = {
+            'location': current_data.get('name', 'Current Location'),
+            'country': current_data.get('sys', {}).get('country'),
+            'coordinates': {
+                'lat': current_data.get('coord', {}).get('lat'),
+                'lon': current_data.get('coord', {}).get('lon')
+            },
+            'current': {
+                'temperature': current_data.get('main', {}).get('temp'),
+                'feels_like': current_data.get('main', {}).get('feels_like'),
+                'humidity': current_data.get('main', {}).get('humidity'),
+                'pressure': current_data.get('main', {}).get('pressure'),
+                'weather_main': current_data.get('weather', [{}])[0].get('main'),
+                'weather_description': current_data.get('weather', [{}])[0].get('description'),
+                'weather_icon': current_data.get('weather', [{}])[0].get('icon'),
+                'wind_speed': current_data.get('wind', {}).get('speed'),
+                'wind_deg': current_data.get('wind', {}).get('deg'),
+                'clouds': current_data.get('clouds', {}).get('all'),
+                'visibility': current_data.get('visibility', 0),
+                'sunrise': current_data.get('sys', {}).get('sunrise'),
+                'sunset': current_data.get('sys', {}).get('sunset'),
+                'timestamp': current_data.get('dt')
+            }
+        }
+
+        # Calculate today's summary
+        if todays_forecasts:
+            temps = [f['temperature'] for f in todays_forecasts if f['temperature'] is not None]
+            humidities = [f['humidity'] for f in todays_forecasts if f['humidity'] is not None]
+            
+            today_summary = {
+                'date': today.isoformat(),
+                'forecast_count': len(todays_forecasts),
+                'temperature_range': {
+                    'min': min(temps) if temps else None,
+                    'max': max(temps) if temps else None,
+                    'avg': sum(temps) / len(temps) if temps else None
+                },
+                'humidity_range': {
+                    'min': min(humidities) if humidities else None,
+                    'max': max(humidities) if humidities else None,
+                    'avg': sum(humidities) / len(humidities) if humidities else None
+                },
+                'most_common_weather': get_most_descriptive_weather(todays_forecasts) if todays_forecasts else None
+            }
+        else:
+            today_summary = {
+                'date': today.isoformat(),
+                'forecast_count': 0,
+                'note': 'No 3-hour forecasts available for today'
+            }
+
+        return {
+            'current_weather': current_weather,
+            'today_summary': today_summary,
+            'hourly_forecasts': todays_forecasts,
+            'api_info': {
+                'source': 'OpenWeather Free Forecast API',
+                'interval': '3-hour',
+                'data_points': len(todays_forecasts)
+            }
         }, None
         
     except Exception as e:
@@ -889,6 +1110,75 @@ def get_hourly_forecast_direct():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/today/<location>', methods=['GET'])
+def get_todays_weather(location):
+    """Get today's weather with 3-hour intervals for a specific location"""
+    try:
+        # Validate location
+        is_valid_location, location_result = validate_location(location)
+        if not is_valid_location:
+            return jsonify({'error': location_result}), 400
+        
+        lat, lon = location_result['latitude'], location_result['longitude']
+        
+        # Get today's weather data
+        weather_data, weather_error = get_todays_weather_3hour(lat, lon)
+        if weather_error:
+            return jsonify({'error': weather_error}), 500
+        
+        return jsonify({
+            'location': location,
+            'weather_data': weather_data
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/today/coordinates', methods=['GET'])
+def get_todays_weather_by_coordinates():
+    """Get today's weather with 3-hour intervals using coordinates"""
+    try:
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        
+        if not lat or not lon:
+            return jsonify({'error': 'Latitude and longitude are required'}), 400
+        
+        # Get today's weather data
+        weather_data, weather_error = get_todays_weather_3hour(lat, lon)
+        if weather_error:
+            return jsonify({'error': weather_error}), 500
+        
+        return jsonify({
+            'coordinates': {'lat': lat, 'lon': lon},
+            'weather_data': weather_data
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/today/record/<int:record_id>', methods=['GET'])
+def get_todays_weather_from_record(record_id):
+    """Get today's weather with 3-hour intervals for a specific weather record location"""
+    try:
+        record = WeatherRecord.query.get(record_id)
+        
+        if not record:
+            return jsonify({'error': 'Record not found'}), 404
+        
+        # Get today's weather data
+        weather_data, weather_error = get_todays_weather_3hour(record.latitude, record.longitude)
+        if weather_error:
+            return jsonify({'error': weather_error}), 500
+        
+        return jsonify({
+            'record_id': record_id,
+            'location': record.location,
+            'weather_data': weather_data
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 # Data Export Endpoints
@@ -975,10 +1265,10 @@ def export_xml():
             ET.SubElement(record_elem, 'created_at').text = record.created_at.isoformat()
             ET.SubElement(record_elem, 'updated_at').text = record.updated_at.isoformat()
         
-        xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
+        xml_str = ET.tostring(root)
         
         return send_file(
-            io.BytesIO(xml_str.encode('utf-8')),
+            io.BytesIO(xml_str),
             mimetype='application/xml',
             as_attachment=True,
             download_name='weather_records.xml'
