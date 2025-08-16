@@ -148,7 +148,7 @@ class ExportService:
     
     def export_to_pdf(self, records: List[WeatherRecord]) -> bytes:
         """
-        Export weather records to PDF format
+        Export weather records to PDF format with detailed weather information
         """
         try:
             buffer = BytesIO()
@@ -159,21 +159,29 @@ class ExportService:
             title_style = ParagraphStyle(
                 'CustomTitle',
                 parent=self.styles['Heading1'],
-                fontSize=16,
+                fontSize=18,
                 spaceAfter=30,
-                alignment=1  # Center alignment
+                alignment=1,  # Center alignment
+                textColor=colors.darkblue
             )
-            title = Paragraph("Weather Records Report", title_style)
+            title = Paragraph("🌤️ Weather Records Report", title_style)
             elements.append(title)
             
             # Summary
-            summary_style = self.styles['Normal']
-            summary_text = f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}<br/>Total Records: {len(records)}"
+            summary_style = ParagraphStyle(
+                'Summary',
+                parent=self.styles['Normal'],
+                fontSize=12,
+                spaceAfter=20
+            )
+            summary_text = f"📅 Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}<br/>"
+            summary_text += f"📊 Total Records: {len(records)}<br/>"
+            summary_text += f"🌍 Weather data from OpenWeather API"
             summary = Paragraph(summary_text, summary_style)
             elements.append(summary)
-            elements.append(Spacer(1, 20))
+            elements.append(Spacer(1, 30))
             
-            # Table data
+            # Table data with more information
             table_data = [['ID', 'Location', 'Date Range', 'Coordinates', 'Created']]
             
             for record in records:
@@ -192,40 +200,94 @@ class ExportService:
             # Create table
             table = Table(table_data, colWidths=[0.5*inch, 2*inch, 1.5*inch, 1.5*inch, 1*inch])
             table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, 0), 10),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.lightblue),
                 ('GRID', (0, 0), (-1, -1), 1, colors.black),
                 ('FONTSIZE', (0, 1), (-1, -1), 8),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ]))
             
             elements.append(table)
-            elements.append(Spacer(1, 20))
+            elements.append(Spacer(1, 30))
             
-            # Weather details for each record
-            for record in records:
+            # Detailed weather information for each record
+            for i, record in enumerate(records, 1):
+                elements.append(Paragraph(f"📋 Record {i}: {record.location}", self.styles['Heading2']))
+                elements.append(Spacer(1, 10))
+                
+                # Basic record info
+                basic_info = f"📍 Location: {record.location}<br/>"
+                basic_info += f"📅 Date Range: {record.start_date} to {record.end_date}<br/>"
+                basic_info += f"🌍 Coordinates: {record.latitude:.4f}, {record.longitude:.4f}<br/>"
+                basic_info += f"📊 Created: {record.created_at.strftime('%Y-%m-%d %H:%M') if record.created_at else 'N/A'}"
+                elements.append(Paragraph(basic_info, self.styles['Normal']))
+                elements.append(Spacer(1, 15))
+                
+                # Weather data details
                 if record.temperature_data:
-                    elements.append(Paragraph(f"<b>Record {record.id} - {record.location}</b>", self.styles['Heading2']))
+                    weather_info = "🌤️ Weather Data:<br/>"
                     
+                    # Current weather
                     if 'current' in record.temperature_data:
                         current = record.temperature_data['current']
                         if 'main' in current:
-                            current_text = f"Current Temperature: {current['main'].get('temp', 'N/A')}°C<br/>"
-                            current_text += f"Humidity: {current['main'].get('humidity', 'N/A')}%"
-                            elements.append(Paragraph(current_text, self.styles['Normal']))
+                            main = current['main']
+                            weather_info += f"🌡️ Current Temperature: {main.get('temp', 'N/A')}°C<br/>"
+                            weather_info += f"💧 Humidity: {main.get('humidity', 'N/A')}%<br/>"
+                            weather_info += f"🌪️ Pressure: {main.get('pressure', 'N/A')} hPa<br/>"
+                            weather_info += f"🌡️ Feels Like: {main.get('feels_like', 'N/A')}°C<br/>"
+                        
+                        if 'weather' in current and current['weather']:
+                            weather_desc = current['weather'][0].get('description', 'N/A')
+                            weather_info += f"☁️ Weather: {weather_desc}<br/>"
+                        
+                        if 'wind' in current:
+                            wind = current['wind']
+                            weather_info += f"💨 Wind Speed: {wind.get('speed', 'N/A')} m/s<br/>"
+                            weather_info += f"🧭 Wind Direction: {wind.get('deg', 'N/A')}°<br/>"
                     
+                    # Forecast data
                     if 'forecast' in record.temperature_data:
                         forecast = record.temperature_data['forecast']
                         if 'list' in forecast:
-                            forecast_text = f"Forecast Periods: {len(forecast['list'])}"
-                            elements.append(Paragraph(forecast_text, self.styles['Normal']))
+                            forecast_list = forecast['list']
+                            weather_info += f"📈 Forecast Periods: {len(forecast_list)}<br/>"
+                            
+                            # Show first few forecast entries
+                            if forecast_list:
+                                weather_info += "<br/>📅 Sample Forecast Data:<br/>"
+                                for j, forecast_item in enumerate(forecast_list[:5], 1):
+                                    dt_txt = forecast_item.get('dt_txt', 'N/A')
+                                    temp = forecast_item.get('main', {}).get('temp', 'N/A')
+                                    desc = forecast_item.get('weather', [{}])[0].get('description', 'N/A')
+                                    weather_info += f"  {j}. {dt_txt}: {temp}°C, {desc}<br/>"
                     
-                    elements.append(Spacer(1, 10))
+                    elements.append(Paragraph(weather_info, self.styles['Normal']))
+                else:
+                    elements.append(Paragraph("❌ No weather data available", self.styles['Normal']))
+                
+                elements.append(Spacer(1, 20))
+                
+                # Add page break if not the last record
+                if i < len(records):
+                    elements.append(PageBreak())
+            
+            # Footer
+            footer_style = ParagraphStyle(
+                'Footer',
+                parent=self.styles['Normal'],
+                fontSize=8,
+                alignment=1,
+                textColor=colors.grey
+            )
+            footer = Paragraph("Generated by Weather App - Powered by OpenWeather API", footer_style)
+            elements.append(Spacer(1, 20))
+            elements.append(footer)
             
             # Build PDF
             doc.build(elements)

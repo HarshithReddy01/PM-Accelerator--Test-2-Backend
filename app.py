@@ -267,6 +267,29 @@ def delete_weather_record(record_id):
         db.session.rollback()
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
+@app.route('/api/weather/clear-all', methods=['DELETE'])
+def clear_all_weather_records():
+    """Delete all weather records"""
+    try:
+        # Get count of records before deletion
+        record_count = WeatherRecord.query.count()
+        
+        if record_count == 0:
+            return jsonify({'message': 'No weather records to delete'}), 200
+        
+        # Delete all records
+        WeatherRecord.query.delete()
+        db.session.commit()
+        
+        return jsonify({
+            'message': f'Successfully deleted {record_count} weather records',
+            'deleted_count': record_count
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
+
 # Today's weather endpoint
 @app.route('/api/today/<location>')
 def get_todays_weather(location):
