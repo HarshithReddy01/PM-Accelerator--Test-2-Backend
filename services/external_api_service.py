@@ -132,35 +132,7 @@ class ExternalAPIService:
         except Exception as e:
             return False, None, f"Nearby places error: {str(e)}"
     
-    def get_place_details(self, place_id: str) -> Tuple[bool, Optional[Dict], Optional[str]]:
-        """
-        Get detailed information about a specific place
-        """
-        try:
-            if not self.google_places_api_key:
-                return False, None, "Google Places API key not configured"
-            
-            details_url = f"{self.google_places_base_url}/details/json"
-            params = {
-                'place_id': place_id,
-                'fields': 'name,formatted_address,formatted_phone_number,website,rating,user_ratings_total,opening_hours,photos,reviews',
-                'key': self.google_places_api_key
-            }
-            
-            response = requests.get(details_url, params=params, timeout=10)
-            
-            if response.status_code != 200:
-                return False, None, f"Google Places Details API error: {response.status_code}"
-            
-            data = response.json()
-            place_details = data.get('result', {})
-            
-            return True, place_details, None
-            
-        except requests.exceptions.RequestException as e:
-            return False, None, f"Google Places Details API request error: {str(e)}"
-        except Exception as e:
-            return False, None, f"Place details error: {str(e)}"
+
     
     def get_multiple_place_types(self, latitude: float, longitude: float, 
                                 place_types: List[str] = None) -> Dict[str, List[Dict]]:
@@ -182,83 +154,7 @@ class ExternalAPIService:
         
         return results
     
-    def get_location_suggestions(self, query: str, max_results: int = 5) -> Tuple[bool, Optional[List[Dict]], Optional[str]]:
-        """
-        Get location suggestions using Google Places Autocomplete API
-        """
-        try:
-            if not self.google_places_api_key:
-                return False, None, "Google Places API key not configured"
-            
-            autocomplete_url = f"{self.google_places_base_url}/autocomplete/json"
-            params = {
-                'input': query,
-                'types': '(cities)',
-                'key': self.google_places_api_key
-            }
-            
-            response = requests.get(autocomplete_url, params=params, timeout=10)
-            
-            if response.status_code != 200:
-                return False, None, f"Google Places Autocomplete API error: {response.status_code}"
-            
-            data = response.json()
-            suggestions = []
-            
-            for prediction in data.get('predictions', [])[:max_results]:
-                suggestion = {
-                    'place_id': prediction.get('place_id'),
-                    'description': prediction.get('description'),
-                    'structured_formatting': prediction.get('structured_formatting', {}),
-                    'types': prediction.get('types', [])
-                }
-                suggestions.append(suggestion)
-            
-            return True, suggestions, None
-            
-        except requests.exceptions.RequestException as e:
-            return False, None, f"Google Places Autocomplete API request error: {str(e)}"
-        except Exception as e:
-            return False, None, f"Location suggestions error: {str(e)}"
-    
-    def get_geocoding_info(self, address: str) -> Tuple[bool, Optional[Dict], Optional[str]]:
-        """
-        Get geocoding information for an address
-        """
-        try:
-            if not self.google_maps_api_key:
-                return False, None, "Google Maps API key not configured"
-            
-            geocoding_url = f"{self.google_maps_base_url}/geocode/json"
-            params = {
-                'address': address,
-                'key': self.google_maps_api_key
-            }
-            
-            response = requests.get(geocoding_url, params=params, timeout=10)
-            
-            if response.status_code != 200:
-                return False, None, f"Google Geocoding API error: {response.status_code}"
-            
-            data = response.json()
-            
-            if data.get('results'):
-                result = data['results'][0]
-                geocoding_info = {
-                    'formatted_address': result.get('formatted_address'),
-                    'geometry': result.get('geometry', {}),
-                    'place_id': result.get('place_id'),
-                    'types': result.get('types', []),
-                    'address_components': result.get('address_components', [])
-                }
-                return True, geocoding_info, None
-            else:
-                return False, None, "No geocoding results found"
-                
-        except requests.exceptions.RequestException as e:
-            return False, None, f"Google Geocoding API request error: {str(e)}"
-        except Exception as e:
-            return False, None, f"Geocoding error: {str(e)}"
+
     
     def get_reverse_geocoding(self, latitude: float, longitude: float) -> Tuple[bool, Optional[Dict], Optional[str]]:
         """

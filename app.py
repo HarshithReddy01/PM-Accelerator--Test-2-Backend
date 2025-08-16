@@ -218,6 +218,26 @@ def update_weather_record(record_id):
             return jsonify({'error': 'Weather record not found'}), 404
         
         try:
+            # Validate location
+            is_valid, location_data, error = weather_service.validate_location(location)
+            if not is_valid:
+                return jsonify({'error': error}), 400
+            
+            # Validate date range
+            is_valid, error = weather_service.validate_date_range(start_date, end_date)
+            if not is_valid:
+                return jsonify({'error': error}), 400
+            
+            # Fetch weather data
+            is_valid, weather_data, error = weather_service.fetch_weather_data(
+                location_data['latitude'],
+                location_data['longitude'],
+                start_date,
+                end_date
+            )
+            if not is_valid:
+                return jsonify({'error': error}), 500
+            
             # Update record
             record.location = location
             record.start_date = start_date

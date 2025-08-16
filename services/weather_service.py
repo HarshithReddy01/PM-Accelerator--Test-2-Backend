@@ -2,8 +2,6 @@ import requests
 import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
-from sqlalchemy.orm import Session
-from models import WeatherRecord
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
 import os
@@ -149,108 +147,7 @@ class WeatherService:
         except Exception as e:
             return False, None, f"Weather data fetch error: {str(e)}"
     
-    def create_weather_record(self, db: Session, location: str, start_date: str, end_date: str, 
-                            latitude: float, longitude: float, temperature_data: Dict) -> Tuple[bool, Optional[WeatherRecord], Optional[str]]:
-        """
-        Create a new weather record in the database
-        """
-        try:
-            weather_record = WeatherRecord(
-                location=location,
-                start_date=start_date,
-                end_date=end_date,
-                latitude=latitude,
-                longitude=longitude,
-                temperature_data=temperature_data
-            )
-            
-            db.add(weather_record)
-            db.commit()
-            db.refresh(weather_record)
-            
-            return True, weather_record, None
-            
-        except Exception as e:
-            db.rollback()
-            return False, None, f"Database error: {str(e)}"
-    
-    def get_all_weather_records(self, db: Session) -> List[WeatherRecord]:
-        """
-        Get all weather records from database
-        """
-        return db.query(WeatherRecord).all()
-    
-    def get_weather_record_by_id(self, db: Session, record_id: int) -> Optional[WeatherRecord]:
-        """
-        Get a specific weather record by ID
-        """
-        return db.query(WeatherRecord).filter(WeatherRecord.id == record_id).first()
-    
-    def update_weather_record(self, db: Session, record_id: int, location: str, 
-                            start_date: str, end_date: str) -> Tuple[bool, Optional[WeatherRecord], Optional[str]]:
-        """
-        Update a weather record
-        """
-        try:
-            record = db.query(WeatherRecord).filter(WeatherRecord.id == record_id).first()
-            if not record:
-                return False, None, "Weather record not found"
-            
-            # Validate location
-            is_valid, location_data, error = self.validate_location(location)
-            if not is_valid:
-                return False, None, error
-            
-            # Validate date range
-            is_valid, error = self.validate_date_range(start_date, end_date)
-            if not is_valid:
-                return False, None, error
-            
-            # Fetch new weather data
-            is_valid, weather_data, error = self.fetch_weather_data(
-                location_data['latitude'], 
-                location_data['longitude'], 
-                start_date, 
-                end_date
-            )
-            if not is_valid:
-                return False, None, error
-            
-            # Update record
-            record.location = location
-            record.start_date = start_date
-            record.end_date = end_date
-            record.latitude = location_data['latitude']
-            record.longitude = location_data['longitude']
-            record.temperature_data = weather_data
-            record.updated_at = datetime.utcnow()
-            
-            db.commit()
-            db.refresh(record)
-            
-            return True, record, None
-            
-        except Exception as e:
-            db.rollback()
-            return False, None, f"Update error: {str(e)}"
-    
-    def delete_weather_record(self, db: Session, record_id: int) -> Tuple[bool, Optional[str]]:
-        """
-        Delete a weather record
-        """
-        try:
-            record = db.query(WeatherRecord).filter(WeatherRecord.id == record_id).first()
-            if not record:
-                return False, "Weather record not found"
-            
-            db.delete(record)
-            db.commit()
-            
-            return True, None
-            
-        except Exception as e:
-            db.rollback()
-            return False, f"Delete error: {str(e)}"
+
     
     def get_todays_weather_3hour(self, location: str) -> Tuple[bool, Optional[Dict], Optional[str]]:
         """
