@@ -11,7 +11,43 @@ from services import WeatherService, ExportService, ExternalAPIService
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+
+
+
+allowed_origins = [
+    "https://HarshithReddy01.github.io",   
+    "https://*.github.io",  
+    "https://*.githubusercontent.com",  
+    "http://localhost:3000",  
+    "http://localhost:3001",  
+    "http://127.0.0.1:3000",    
+    "http://127.0.0.1:3001",  
+    "http://localhost:5000",  
+    "http://127.0.0.1:5000",  
+]
+
+
+custom_origins = os.getenv('CORS_ORIGINS', '').split(',') if os.getenv('CORS_ORIGINS') else []
+allowed_origins.extend([origin.strip() for origin in custom_origins if origin.strip()])
+
+
+CORS(app, 
+     origins=allowed_origins,
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+     supports_credentials=True,
+     max_age=3600)
+
+    
+@app.after_request
+def after_request(response):
+
+    response.headers.add('X-Content-Type-Options', 'nosniff')
+    response.headers.add('X-Frame-Options', 'DENY')
+    response.headers.add('X-XSS-Protection', '1; mode=block')
+    return response
+
+
 
 # Database configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
