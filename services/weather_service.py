@@ -226,3 +226,140 @@ class WeatherService:
                 return value
         
         return weather_desc.title()
+
+    def get_hourly_forecast(self, location: str, date: str = None) -> Tuple[bool, Optional[Dict], Optional[str]]:
+        """Get true hourly forecast data (every hour) for a location"""
+        try:
+            is_valid, location_data, error = self.validate_location(location)
+            if not is_valid:
+                return False, None, error
+            
+            if not date:
+                date = datetime.now().strftime('%Y-%m-%d')
+            
+            # Get current weather and 5-day forecast
+            is_valid, weather_data, error = self.fetch_weather_data(
+                location_data['latitude'],
+                location_data['longitude'],
+                date,
+                (datetime.now() + timedelta(days=5)).strftime('%Y-%m-%d')
+            )
+            if not is_valid:
+                return False, None, error
+            
+            # Extract hourly data from the 3-hour forecast and interpolate
+            forecast_list = weather_data.get('forecast', {}).get('list', [])
+            hourly_data = self._interpolate_to_hourly(forecast_list, date)
+            
+            result = {
+                'location': location_data['display_name'],
+                'date': date,
+                'hourly_forecast': {
+                    'hourly': hourly_data,
+                    'note': f'Hourly forecast for {location_data["display_name"]} on {date}'
+                }
+            }
+            
+            return True, result, None
+            
+        except Exception as e:
+            return False, None, f"Hourly forecast error: {str(e)}"
+
+    def get_hourly_forecast_by_coordinates(self, lat: float, lon: float) -> Tuple[bool, Optional[Dict], Optional[str]]:
+        """Get true hourly forecast data for coordinates"""
+        try:
+            # Get current weather and 5-day forecast
+            is_valid, weather_data, error = self.fetch_weather_data(
+                lat, lon,
+                datetime.now().strftime('%Y-%m-%d'),
+                (datetime.now() + timedelta(days=5)).strftime('%Y-%m-%d')
+            )
+            if not is_valid:
+                return False, None, error
+            
+            # Extract hourly data from the 3-hour forecast and interpolate
+            forecast_list = weather_data.get('forecast', {}).get('list', [])
+            hourly_data = self._interpolate_to_hourly(forecast_list, datetime.now().strftime('%Y-%m-%d'))
+            
+            result = {
+                'location': f"{lat},{lon}",
+                'date': datetime.now().strftime('%Y-%m-%d'),
+                'hourly_forecast': {
+                    'hourly': hourly_data,
+                    'note': f'Hourly forecast for coordinates {lat},{lon}'
+                }
+            }
+            
+            return True, result, None
+            
+        except Exception as e:
+            return False, None, f"Hourly forecast error: {str(e)}"
+
+    def _interpolate_to_hourly(self, forecast_list: List[Dict], target_date: str) -> List[Dict]:
+        """Convert 3-hour forecast data to hourly data by interpolation"""
+        hourly_data = []
+        
+        if not forecast_list:
+            return hourly_data
+        
+        # Group forecasts by date
+        forecasts_by_date = {}
+        for item in forecast_list:
+            dt = datetime.fromtimestamp(item['dt'])
+            date_key = dt.strftime('%Y-%m-%d')
+            if date_key not in forecasts_by_date:
+                forecasts_by_date[date_key] = []
+            forecasts_by_date[date_key].append({
+                'dt': item['dt'],
+                'dt_txt': item['dt_txt'],
+                'main': item['main'],
+                'weather': item['weather'],
+                'wind': item.get('wind', {}),
+                'visibility': item.get('visibility'),
+                'pop': item.get('pop', 0),
+                'uvi': item.get('uvi', 0)
+            })
+        
+        # Get forecasts for the target date
+        target_forecasts = forecasts_by_date.get(target_date, [])
+        
+        if not target_forecasts:
+            return hourly_data
+        
+        # Sort forecasts by time
+        target_forecasts.sort(key=lambda x: x['dt'])
+        
+        # Generate hourly data for the target date
+        for hour in range(24):
+            hour_dt = datetime.strptime(f"{target_date} {hour:02d}:00:00", "%Y-%m-%d %H:%M:%S")
+            
+            # Find the closest forecast data
+            closest_forecast = None
+            min_diff = float('inf')
+            
+            for forecast in target_forecasts:
+                forecast_dt = datetime.fromtimestamp(forecast['dt'])
+                diff = abs((hour_dt - forecast_dt).total_seconds())
+                if diff < min_diff:
+                    min_diff = diff
+                    closest_forecast = forecast
+            
+            if closest_forecast:
+                hourly_data.append({
+                    'dt': hour_dt.timestamp(),
+                    'dt_txt': hour_dt.strftime('%Y-%m-%d %H:%M:%S'),
+                    'time': hour_dt.strftime('%H:%M'),
+                    'main': closest_forecast['main'],
+                    'weather': closest_forecast['weather'],
+                    'wind': closest_forecast['wind'],
+                    'visibility': closest_forecast['visibility'],
+                    'pop': closest_forecast['pop'],
+                    'uvi': closest_forecast['uvi'],
+                    'temp': closest_forecast['main']['temp'],
+                    'feels_like': closest_forecast['main']['feels_like'],
+                    'humidity': closest_forecast['main']['humidity'],
+                    'pressure': closest_forecast['main']['pressure'],
+                    'wind_speed': closest_forecast['wind'].get('speed', 0)
+                })
+        
+        return hourly_data
