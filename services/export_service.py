@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from sqlalchemy.orm import Session
 from models import WeatherRecord
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib import colors
@@ -97,19 +97,23 @@ class ExportService:
                 
                 # record info
                 ET.SubElement(record_elem, "id").text = str(record.id)
-                ET.SubElement(record_elem, "location").text = record.location
-                ET.SubElement(record_elem, "start_date").text = record.start_date
-                ET.SubElement(record_elem, "end_date").text = record.end_date
+                ET.SubElement(record_elem, "location").text = str(record.location or 'N/A')
+                ET.SubElement(record_elem, "start_date").text = str(record.start_date or 'N/A')
+                ET.SubElement(record_elem, "end_date").text = str(record.end_date or 'N/A')
                 ET.SubElement(record_elem, "latitude").text = str(record.latitude)
                 ET.SubElement(record_elem, "longitude").text = str(record.longitude)
                 
                 created_elem = ET.SubElement(record_elem, "created_at")
                 if record.created_at:
                     created_elem.text = record.created_at.isoformat()
+                else:
+                    created_elem.text = 'N/A'
                 
                 updated_elem = ET.SubElement(record_elem, "updated_at")
                 if record.updated_at:
                     updated_elem.text = record.updated_at.isoformat()
+                else:
+                    updated_elem.text = 'N/A'
                 
                 # summariy
                 if record.temperature_data:
