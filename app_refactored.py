@@ -5,9 +5,8 @@ import os
 from dotenv import load_dotenv
 from io import BytesIO
 
-# Import models and service classes
-from models import db, WeatherRecord
-from services import WeatherService, ExportService, ExternalAPIService
+# Import service classes
+from services import WeatherService, ExportService, ExternalAPIService, DatabaseService
 
 # Load environment variables
 load_dotenv()
@@ -15,29 +14,18 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# Database configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_recycle': 300,
-    'pool_pre_ping': True
-}
-
-# Initialize database
-db.init_app(app)
-
 # Initialize services
 weather_service = WeatherService()
 export_service = ExportService()
 external_api_service = ExternalAPIService()
+database_service = DatabaseService()
 
 # Create database tables
-with app.app_context():
-    try:
-        db.create_all()
-        print("✅ Database tables created successfully")
-    except Exception as e:
-        print(f"❌ Error creating database tables: {str(e)}")
+try:
+    database_service.create_tables()
+    print("Database tables created successfully")
+except Exception as e:
+    print(f"Error creating database tables: {str(e)}")
 
 # Health check endpoint
 @app.route('/api/health', methods=['GET'])
@@ -45,18 +33,17 @@ def health_check():
     """Health check endpoint"""
     try:
         # Test database connection
-        db_connected = True
-        try:
-            db.session.execute("SELECT 1")
-        except:
-            db_connected = False
+        db_connected = database_service.test_connection()
+        
+        # Get database info
+        db_info = database_service.get_database_info()
         
         return jsonify({
             'status': 'healthy',
             'timestamp': datetime.utcnow().isoformat(),
             'database': {
                 'connected': db_connected,
-                'info': 'Flask-SQLAlchemy initialized'
+                'info': db_info
             },
             'services': {
                 'weather_service': 'initialized',
@@ -109,37 +96,39 @@ def create_weather_record():
         if not is_valid:
             return jsonify({'error': error}), 500
         
-        # Create weather record
+        # Create database session
+        db_session = database_service.get_session()
+        
         try:
-            weather_record = WeatherRecord(
-                location=location,
-                start_date=start_date,
-                end_date=end_date,
-                latitude=location_data['latitude'],
-                longitude=location_data['longitude'],
-                temperature_data=weather_data
+            # Create weather record
+            is_valid, record, error = weather_service.create_weather_record(
+                db_session,
+                location,
+                start_date,
+                end_date,
+                location_data['latitude'],
+                location_data['longitude'],
+                weather_data
             )
             
-            db.session.add(weather_record)
-            db.session.commit()
-            db.session.refresh(weather_record)
+            if not is_valid:
+                return jsonify({'error': error}), 500
             
             return jsonify({
                 'message': 'Weather record created successfully',
                 'data': {
-                    'id': weather_record.id,
-                    'location': weather_record.location,
-                    'start_date': weather_record.start_date,
-                    'end_date': weather_record.end_date,
-                    'latitude': weather_record.latitude,
-                    'longitude': weather_record.longitude,
-                    'created_at': weather_record.created_at.isoformat()
+                    'id': record.id,
+                    'location': record.location,
+                    'start_date': record.start_date,
+                    'end_date': record.end_date,
+                    'latitude': record.latitude,
+                    'longitude': record.longitude,
+                    'created_at': record.created_at.isoformat()
                 }
             }), 201
             
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': f'Database error: {str(e)}'}), 500
+        finally:
+            database_service.close_session(db_session)
             
     except Exception as e:
         return jsonify({'error': f'Server error: {str(e)}'}), 500
@@ -148,11 +137,49 @@ def create_weather_record():
 def get_all_weather_records():
     """Get all weather records"""
     try:
-        records = WeatherRecord.query.all()
+        db_session = database_service.get_session()
         
-        records_data = []
-        for record in records:
-            records_data.append({
+        try:
+            records = weather_service.get_all_weather_records(db_session)
+            
+            records_data = []
+            for record in records:
+                records_data.append({
+                    'id': record.id,
+                    'location': record.location,
+                    'start_date': record.start_date,
+                    'end_date': record.end_date,
+                    'latitude': record.latitude,
+                    'longitude': record.longitude,
+                    'created_at': record.created_at.isoformat() if record.created_at else None,
+                    'updated_at': record.updated_at.isoformat() if record.updated_at else None,
+                    'temperature_data': record.temperature_data
+                })
+            
+            return jsonify({
+                'records': records_data,
+                'total': len(records_data)
+            }), 200
+            
+        finally:
+            database_service.close_session(db_session)
+            
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
+
+@app.route('/api/weather/<int:record_id>', methods=['GET'])
+def get_weather_record(record_id):
+    """Get a specific weather record"""
+    try:
+        db_session = database_service.get_session()
+        
+        try:
+            record = weather_service.get_weather_record_by_id(db_session, record_id)
+            
+            if not record:
+                return jsonify({'error': 'Weather record not found'}), 404
+            
+            return jsonify({
                 'id': record.id,
                 'location': record.location,
                 'start_date': record.start_date,
@@ -162,37 +189,11 @@ def get_all_weather_records():
                 'created_at': record.created_at.isoformat() if record.created_at else None,
                 'updated_at': record.updated_at.isoformat() if record.updated_at else None,
                 'temperature_data': record.temperature_data
-            })
-        
-        return jsonify({
-            'records': records_data,
-            'total': len(records_data)
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': f'Server error: {str(e)}'}), 500
-
-@app.route('/api/weather/<int:record_id>', methods=['GET'])
-def get_weather_record(record_id):
-    """Get a specific weather record"""
-    try:
-        record = WeatherRecord.query.get(record_id)
-        
-        if not record:
-            return jsonify({'error': 'Weather record not found'}), 404
-        
-        return jsonify({
-            'id': record.id,
-            'location': record.location,
-            'start_date': record.start_date,
-            'end_date': record.end_date,
-            'latitude': record.latitude,
-            'longitude': record.longitude,
-            'created_at': record.created_at.isoformat() if record.created_at else None,
-            'updated_at': record.updated_at.isoformat() if record.updated_at else None,
-            'temperature_data': record.temperature_data
-        }), 200
-        
+            }), 200
+            
+        finally:
+            database_service.close_session(db_session)
+            
     except Exception as e:
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
@@ -212,22 +213,19 @@ def update_weather_record(record_id):
         if not all([location, start_date, end_date]):
             return jsonify({'error': 'Missing required fields: location, start_date, end_date'}), 400
         
-        # Find the record
-        record = WeatherRecord.query.get(record_id)
-        if not record:
-            return jsonify({'error': 'Weather record not found'}), 404
+        db_session = database_service.get_session()
         
         try:
-            # Update record
-            record.location = location
-            record.start_date = start_date
-            record.end_date = end_date
-            record.latitude = location_data['latitude']
-            record.longitude = location_data['longitude']
-            record.temperature_data = weather_data
-            record.updated_at = datetime.utcnow()
+            is_valid, record, error = weather_service.update_weather_record(
+                db_session,
+                record_id,
+                location,
+                start_date,
+                end_date
+            )
             
-            db.session.commit()
+            if not is_valid:
+                return jsonify({'error': error}), 400 if 'not found' in error else 500
             
             return jsonify({
                 'message': 'Weather record updated successfully',
@@ -242,9 +240,8 @@ def update_weather_record(record_id):
                 }
             }), 200
             
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': f'Update error: {str(e)}'}), 500
+        finally:
+            database_service.close_session(db_session)
             
     except Exception as e:
         return jsonify({'error': f'Server error: {str(e)}'}), 500
@@ -253,18 +250,20 @@ def update_weather_record(record_id):
 def delete_weather_record(record_id):
     """Delete a weather record"""
     try:
-        record = WeatherRecord.query.get(record_id)
+        db_session = database_service.get_session()
         
-        if not record:
-            return jsonify({'error': 'Weather record not found'}), 404
-        
-        db.session.delete(record)
-        db.session.commit()
-        
-        return jsonify({'message': 'Weather record deleted successfully'}), 200
-        
+        try:
+            is_valid, error = weather_service.delete_weather_record(db_session, record_id)
+            
+            if not is_valid:
+                return jsonify({'error': error}), 404
+            
+            return jsonify({'message': 'Weather record deleted successfully'}), 200
+            
+        finally:
+            database_service.close_session(db_session)
+            
     except Exception as e:
-        db.session.rollback()
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 # Today's weather endpoint
@@ -322,42 +321,38 @@ def get_todays_weather_by_coordinates():
 def export_data(format_type):
     """Export weather records in various formats"""
     try:
-        records = WeatherRecord.query.all()
+        db_session = database_service.get_session()
         
-        if format_type == 'json':
-            data = export_service.export_to_json(records)
-        elif format_type == 'csv':
-            data = export_service.export_to_csv(records)
-        elif format_type == 'xml':
-            data = export_service.export_to_xml(records)
-        elif format_type == 'pdf':
-            data = export_service.export_to_pdf(records)
-        elif format_type == 'markdown':
-            data = export_service.export_to_markdown(records)
-        else:
-            return jsonify({'error': f'Unsupported export format: {format_type}'}), 400
-        
-        # Create file response
-        if format_type == 'pdf':
-            # PDF is binary data
-            buffer = BytesIO(data)
-            buffer.seek(0)
-            return send_file(
-                buffer,
-                mimetype='application/pdf',
-                as_attachment=True,
-                download_name=f'weather_records_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
-            )
-        else:
-            # Text-based formats
-            buffer = BytesIO(data.encode('utf-8'))
-            buffer.seek(0)
-            return send_file(
-                buffer,
-                mimetype=_get_mime_type(format_type),
-                as_attachment=True,
-                download_name=f'weather_records_{datetime.now().strftime("%Y%m%d_%H%M%S")}.{format_type}'
-            )
+        try:
+            is_valid, data, error = export_service.export_records(db_session, format_type)
+            
+            if not is_valid:
+                return jsonify({'error': error}), 400
+            
+            # Create file response
+            if format_type == 'pdf':
+                # PDF is binary data
+                buffer = BytesIO(data)
+                buffer.seek(0)
+                return send_file(
+                    buffer,
+                    mimetype='application/pdf',
+                    as_attachment=True,
+                    download_name=f'weather_records_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+                )
+            else:
+                # Text-based formats
+                buffer = BytesIO(data.encode('utf-8'))
+                buffer.seek(0)
+                return send_file(
+                    buffer,
+                    mimetype=_get_mime_type(format_type),
+                    as_attachment=True,
+                    download_name=f'weather_records_{datetime.now().strftime("%Y%m%d_%H%M%S")}.{format_type}'
+                )
+                
+        finally:
+            database_service.close_session(db_session)
             
     except Exception as e:
         return jsonify({'error': f'Export error: {str(e)}'}), 500
@@ -378,8 +373,6 @@ def get_youtube_videos(location):
     """Get YouTube videos for a location"""
     try:
         max_results = request.args.get('max_results', 5, type=int)
-        
-        # Note: API key check is now handled in the service with mock data fallback
         
         is_valid, videos, error = external_api_service.get_youtube_videos(location, max_results)
         
@@ -406,8 +399,6 @@ def get_nearby_places():
         
         if not lat or not lon:
             return jsonify({'error': 'Missing latitude or longitude parameters'}), 400
-        
-        # Note: API key check is now handled in the service with mock data fallback
         
         is_valid, places, error = external_api_service.get_nearby_places(lat, lon, radius, place_type)
         
@@ -449,35 +440,6 @@ def get_multiple_place_types():
     except Exception as e:
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
-@app.route('/api/places/photo')
-def get_place_photo():
-    """Get place photo by photo reference"""
-    try:
-        photo_reference = request.args.get('photo_reference')
-        max_width = request.args.get('max_width', 400, type=int)
-        
-        if not photo_reference:
-            return jsonify({'error': 'Missing photo_reference parameter'}), 400
-        
-        # For mock photos, return placeholder images
-        if photo_reference.startswith('mock_photo_'):
-            # Return different placeholder images based on photo reference
-            photo_number = photo_reference.split('_')[-1]
-            placeholder_url = f'https://via.placeholder.com/{max_width}x300/4A90E2/ffffff?text=Place+Photo+{photo_number}'
-            return jsonify({'photo_url': placeholder_url}), 200
-        
-        # For real photos, you would use Google Places Photo API
-        if external_api_service.google_places_api_key:
-            photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth={max_width}&photo_reference={photo_reference}&key={external_api_service.google_places_api_key}"
-            return jsonify({'photo_url': photo_url}), 200
-        else:
-            # Fallback to placeholder
-            placeholder_url = f'https://via.placeholder.com/{max_width}x300/4A90E2/ffffff?text=Photo+Not+Available'
-            return jsonify({'photo_url': placeholder_url}), 200
-        
-    except Exception as e:
-        return jsonify({'error': f'Server error: {str(e)}'}), 500
-
 @app.route('/api/maps/embed')
 def get_maps_embed_url():
     """Get Google Maps embed URL"""
@@ -501,7 +463,33 @@ def get_maps_embed_url():
     except Exception as e:
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
+# Database management endpoints
+@app.route('/api/database/stats')
+def get_database_stats():
+    """Get database statistics"""
+    try:
+        stats = database_service.get_database_stats()
+        return jsonify(stats), 200
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
+@app.route('/api/database/cleanup', methods=['POST'])
+def cleanup_old_records():
+    """Clean up old weather records"""
+    try:
+        data = request.get_json() or {}
+        days_old = data.get('days_old', 30)
+        
+        deleted_count = database_service.cleanup_old_records(days_old)
+        
+        return jsonify({
+            'message': f'Cleaned up {deleted_count} old records',
+            'deleted_count': deleted_count,
+            'days_old': days_old
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
