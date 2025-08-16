@@ -9,15 +9,11 @@ import os
 class WeatherService:
     def __init__(self):
         self.openweather_api_key = os.getenv('OPENWEATHER_API_KEY')
-        self.openweather_base_url = 'https://api.openweathermap.org/data/2.5'
+        self.openweather_base_url = 'https://api.openweathermap.org/data/2.5' #free paln- Harshith Reddy
         self.geolocator = Nominatim(user_agent="weather_app")
         
     def validate_location(self, location: str) -> Tuple[bool, Optional[Dict], Optional[str]]:
-        """
-        Validate if a location exists and return coordinates
-        """
         try:
-            # Try to geocode the location
             location_data = self.geolocator.geocode(location, timeout=10)
             
             if location_data:
@@ -43,15 +39,11 @@ class WeatherService:
             end = datetime.strptime(end_date, '%Y-%m-%d').date()
             today = datetime.now().date()
             
-            # Check if start date is in the past
             if start < today:
                 return False, "Start date cannot be in the past"
             
-            # Check if end date is before start date
             if end < start:
                 return False, "End date must be after start date"
-            
-            # Check if date range exceeds 7 days
             days_diff = (end - start).days
             if days_diff > 7:
                 return False, "Date range cannot exceed 7 days"
@@ -64,9 +56,6 @@ class WeatherService:
             return False, f"Date validation error: {str(e)}"
     
     def fetch_weather_data(self, lat: float, lon: float, start_date: str, end_date: str) -> Tuple[bool, Optional[Dict], Optional[str]]:
-        """
-        Fetch weather data from OpenWeather API
-        """
         try:
             # Get current weather
             current_response = requests.get(
@@ -84,7 +73,6 @@ class WeatherService:
             
             current_data = current_response.json()
             
-            # Get 5-day forecast
             forecast_response = requests.get(
                 f"{self.openweather_base_url}/forecast",
                 params={
@@ -115,14 +103,12 @@ class WeatherService:
             
             forecast_data = forecast_response.json()
             
-            # Debug logging
             if forecast_data.get('list'):
                 first_item = forecast_data['list'][0]
                 last_item = forecast_data['list'][-1]
                 print(f"First forecast: {first_item.get('dt_txt')} - {datetime.fromtimestamp(first_item.get('dt'))}")
                 print(f"Last forecast: {last_item.get('dt_txt')} - {datetime.fromtimestamp(last_item.get('dt'))}")
                 
-                # Check if we have enough data for 5 days
                 forecast_dates = set()
                 for item in forecast_data.get('list', []):
                     forecast_date = datetime.fromtimestamp(item.get('dt')).date()
@@ -131,12 +117,10 @@ class WeatherService:
                 print(f"Unique forecast dates available: {len(forecast_dates)}")
                 print(f"Available dates: {sorted(forecast_dates)}")
                 
-                # Log the available dates for debugging
                 print(f"Available forecast dates: {sorted(forecast_dates)}")
                 if len(forecast_dates) < 6:
                     print(f"Warning: Only {len(forecast_dates)} unique dates available, may not have enough data for 5-day forecast")
             
-            # Combine current and forecast data
             weather_data = {
                 'current': current_data,
                 'forecast': forecast_data
@@ -150,16 +134,11 @@ class WeatherService:
 
     
     def get_todays_weather_3hour(self, location: str) -> Tuple[bool, Optional[Dict], Optional[str]]:
-        """
-        Get today's weather with 3-hour intervals
-        """
         try:
-            # Validate location
             is_valid, location_data, error = self.validate_location(location)
             if not is_valid:
                 return False, None, error
             
-            # Fetch weather data
             is_valid, weather_data, error = self.fetch_weather_data(
                 location_data['latitude'],
                 location_data['longitude'],
@@ -169,7 +148,6 @@ class WeatherService:
             if not is_valid:
                 return False, None, error
             
-            # Process 3-hour interval data
             forecast_list = weather_data.get('forecast', {}).get('list', [])
             hourly_data = []
             
@@ -187,7 +165,6 @@ class WeatherService:
                     'weather_id': item['weather'][0]['id']
                 })
             
-            # Calculate most common weather
             weather_counts = {}
             for item in hourly_data:
                 weather_desc = item['description'].lower()
@@ -195,7 +172,6 @@ class WeatherService:
             
             most_common_weather = max(weather_counts.items(), key=lambda x: x[1])[0] if weather_counts else "Unknown"
             
-            # Get most descriptive weather
             most_descriptive = self.get_most_descriptive_weather(hourly_data)
             
             result = {
@@ -216,13 +192,9 @@ class WeatherService:
             return False, None, f"Today's weather error: {str(e)}"
     
     def get_most_descriptive_weather(self, hourly_data: List[Dict]) -> str:
-        """
-        Get the most descriptive weather condition from hourly data
-        """
         if not hourly_data:
             return "Mixed Conditions"
         
-        # Priority order for weather descriptions
         priority_weather = [
             'thunderstorm', 'rain', 'snow', 'fog', 'mist', 'haze',
             'clear sky', 'few clouds', 'scattered clouds', 'broken clouds', 'overcast clouds'
@@ -233,10 +205,8 @@ class WeatherService:
             desc = item['description'].lower()
             weather_counts[desc] = weather_counts.get(desc, 0) + 1
         
-        # Find the most frequent weather with highest priority
         most_frequent = max(weather_counts.items(), key=lambda x: x[1])
         
-        # Map generic terms to more descriptive ones
         weather_mapping = {
             'clouds': 'Partly Cloudy',
             'clear': 'Clear Sky',
@@ -251,10 +221,8 @@ class WeatherService:
         
         weather_desc = most_frequent[0]
         
-        # Check if we have a mapping for this weather
         for key, value in weather_mapping.items():
             if key in weather_desc:
                 return value
         
-        # Return capitalized description if no mapping found
         return weather_desc.title()

@@ -4,12 +4,10 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 from io import BytesIO
-
-# Import models and service classes
 from models import db, WeatherRecord
 from services import WeatherService, ExportService, ExternalAPIService
 
-# Load environment variables
+#Im getting .env
 load_dotenv()
 
 app = Flask(__name__)
@@ -22,29 +20,21 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_recycle': 300,
     'pool_pre_ping': True
 }
-
-# Initialize database
 db.init_app(app)
-
-# Initialize services
 weather_service = WeatherService()
 export_service = ExportService()
 external_api_service = ExternalAPIService()
-
-# Create database tables
 with app.app_context():
     try:
         db.create_all()
-        print("✅ Database tables created successfully")
+        print("Database tables created successfully")
     except Exception as e:
-        print(f"❌ Error creating database tables: {str(e)}")
+        print(f"Error creating database tables: {str(e)}")
 
-# Health check endpoint
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
     try:
-        # Test database connection
         db_connected = True
         try:
             db.session.execute("SELECT 1")
@@ -72,10 +62,8 @@ def health_check():
             'timestamp': datetime.utcnow().isoformat()
         }), 500
 
-# Weather CRUD endpoints
 @app.route('/api/weather', methods=['POST'])
 def create_weather_record():
-    """Create a new weather record"""
     try:
         data = request.get_json()
         
@@ -89,17 +77,14 @@ def create_weather_record():
         if not all([location, start_date, end_date]):
             return jsonify({'error': 'Missing required fields: location, start_date, end_date'}), 400
         
-        # Validate location
         is_valid, location_data, error = weather_service.validate_location(location)
         if not is_valid:
             return jsonify({'error': error}), 400
         
-        # Validate date range
         is_valid, error = weather_service.validate_date_range(start_date, end_date)
         if not is_valid:
             return jsonify({'error': error}), 400
         
-        # Fetch weather data
         is_valid, weather_data, error = weather_service.fetch_weather_data(
             location_data['latitude'],
             location_data['longitude'],
@@ -109,7 +94,6 @@ def create_weather_record():
         if not is_valid:
             return jsonify({'error': error}), 500
         
-        # Create weather record
         try:
             weather_record = WeatherRecord(
                 location=location,
@@ -146,7 +130,6 @@ def create_weather_record():
 
 @app.route('/api/weather', methods=['GET'])
 def get_all_weather_records():
-    """Get all weather records"""
     try:
         records = WeatherRecord.query.all()
         
@@ -174,7 +157,6 @@ def get_all_weather_records():
 
 @app.route('/api/weather/<int:record_id>', methods=['GET'])
 def get_weather_record(record_id):
-    """Get a specific weather record"""
     try:
         record = WeatherRecord.query.get(record_id)
         
@@ -198,7 +180,6 @@ def get_weather_record(record_id):
 
 @app.route('/api/weather/<int:record_id>', methods=['PUT'])
 def update_weather_record(record_id):
-    """Update a weather record"""
     try:
         data = request.get_json()
         
@@ -212,23 +193,19 @@ def update_weather_record(record_id):
         if not all([location, start_date, end_date]):
             return jsonify({'error': 'Missing required fields: location, start_date, end_date'}), 400
         
-        # Find the record
         record = WeatherRecord.query.get(record_id)
         if not record:
             return jsonify({'error': 'Weather record not found'}), 404
         
         try:
-            # Validate location
             is_valid, location_data, error = weather_service.validate_location(location)
             if not is_valid:
                 return jsonify({'error': error}), 400
             
-            # Validate date range
             is_valid, error = weather_service.validate_date_range(start_date, end_date)
             if not is_valid:
                 return jsonify({'error': error}), 400
             
-            # Fetch weather data
             is_valid, weather_data, error = weather_service.fetch_weather_data(
                 location_data['latitude'],
                 location_data['longitude'],
@@ -238,7 +215,6 @@ def update_weather_record(record_id):
             if not is_valid:
                 return jsonify({'error': error}), 500
             
-            # Update record
             record.location = location
             record.start_date = start_date
             record.end_date = end_date
@@ -271,7 +247,6 @@ def update_weather_record(record_id):
 
 @app.route('/api/weather/<int:record_id>', methods=['DELETE'])
 def delete_weather_record(record_id):
-    """Delete a weather record"""
     try:
         record = WeatherRecord.query.get(record_id)
         
@@ -289,15 +264,12 @@ def delete_weather_record(record_id):
 
 @app.route('/api/weather/clear-all', methods=['DELETE'])
 def clear_all_weather_records():
-    """Delete all weather records"""
     try:
-        # Get count of records before deletion
         record_count = WeatherRecord.query.count()
         
         if record_count == 0:
             return jsonify({'message': 'No weather records to delete'}), 200
         
-        # Delete all records
         WeatherRecord.query.delete()
         db.session.commit()
         
@@ -310,10 +282,8 @@ def clear_all_weather_records():
         db.session.rollback()
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
-# Today's weather endpoint
 @app.route('/api/today/<location>')
 def get_todays_weather(location):
-    """Get today's weather with 3-hour intervals"""
     try:
         is_valid, data, error = weather_service.get_todays_weather_3hour(location)
         
@@ -325,10 +295,8 @@ def get_todays_weather(location):
     except Exception as e:
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
-# Coordinates endpoint for today's weather
 @app.route('/api/today/coordinates')
 def get_todays_weather_by_coordinates():
-    """Get today's weather by coordinates"""
     try:
         lat = request.args.get('lat')
         lon = request.args.get('lon')
@@ -342,7 +310,6 @@ def get_todays_weather_by_coordinates():
         except ValueError:
             return jsonify({'error': 'Invalid latitude or longitude values'}), 400
         
-        # Use reverse geocoding to get location name
         is_valid, location_data, error = external_api_service.get_reverse_geocoding(lat, lon)
         
         if is_valid:
@@ -360,10 +327,8 @@ def get_todays_weather_by_coordinates():
     except Exception as e:
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
-# Export endpoints
 @app.route('/api/export/<format_type>')
 def export_data(format_type):
-    """Export weather records in various formats"""
     try:
         records = WeatherRecord.query.all()
         
@@ -380,9 +345,7 @@ def export_data(format_type):
         else:
             return jsonify({'error': f'Unsupported export format: {format_type}'}), 400
         
-        # Create file response
         if format_type == 'pdf':
-            # PDF is binary data
             buffer = BytesIO(data)
             buffer.seek(0)
             return send_file(
@@ -392,7 +355,6 @@ def export_data(format_type):
                 download_name=f'weather_records_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
             )
         else:
-            # Text-based formats
             buffer = BytesIO(data.encode('utf-8'))
             buffer.seek(0)
             return send_file(
@@ -406,7 +368,6 @@ def export_data(format_type):
         return jsonify({'error': f'Export error: {str(e)}'}), 500
 
 def _get_mime_type(format_type):
-    """Get MIME type for export format"""
     mime_types = {
         'json': 'application/json',
         'csv': 'text/csv',
@@ -415,14 +376,10 @@ def _get_mime_type(format_type):
     }
     return mime_types.get(format_type, 'text/plain')
 
-# External API endpoints
 @app.route('/api/youtube/<location>')
 def get_youtube_videos(location):
-    """Get YouTube videos for a location"""
     try:
         max_results = request.args.get('max_results', 5, type=int)
-        
-        # Note: API key check is now handled in the service with mock data fallback
         
         is_valid, videos, error = external_api_service.get_youtube_videos(location, max_results)
         
@@ -440,7 +397,6 @@ def get_youtube_videos(location):
 
 @app.route('/api/places/nearby')
 def get_nearby_places():
-    """Get nearby places"""
     try:
         lat = request.args.get('lat', type=float)
         lon = request.args.get('lon', type=float)
@@ -449,8 +405,6 @@ def get_nearby_places():
         
         if not lat or not lon:
             return jsonify({'error': 'Missing latitude or longitude parameters'}), 400
-        
-        # Note: API key check is now handled in the service with mock data fallback
         
         is_valid, places, error = external_api_service.get_nearby_places(lat, lon, radius, place_type)
         
@@ -471,7 +425,6 @@ def get_nearby_places():
 
 @app.route('/api/places/multiple')
 def get_multiple_place_types():
-    """Get multiple types of nearby places"""
     try:
         lat = request.args.get('lat', type=float)
         lon = request.args.get('lon', type=float)
@@ -494,7 +447,6 @@ def get_multiple_place_types():
 
 @app.route('/api/places/photo')
 def get_place_photo():
-    """Get place photo by photo reference"""
     try:
         photo_reference = request.args.get('photo_reference')
         max_width = request.args.get('max_width', 400, type=int)
@@ -502,19 +454,15 @@ def get_place_photo():
         if not photo_reference:
             return jsonify({'error': 'Missing photo_reference parameter'}), 400
         
-        # For mock photos, return placeholder images
         if photo_reference.startswith('mock_photo_'):
-            # Return different placeholder images based on photo reference
             photo_number = photo_reference.split('_')[-1]
             placeholder_url = f'https://via.placeholder.com/{max_width}x300/4A90E2/ffffff?text=Place+Photo+{photo_number}'
             return jsonify({'photo_url': placeholder_url}), 200
         
-        # For real photos, you would use Google Places Photo API
         if external_api_service.google_places_api_key:
             photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth={max_width}&photo_reference={photo_reference}&key={external_api_service.google_places_api_key}"
             return jsonify({'photo_url': photo_url}), 200
         else:
-            # Fallback to placeholder
             placeholder_url = f'https://via.placeholder.com/{max_width}x300/4A90E2/ffffff?text=Photo+Not+Available'
             return jsonify({'photo_url': placeholder_url}), 200
         
@@ -523,7 +471,6 @@ def get_place_photo():
 
 @app.route('/api/maps/embed')
 def get_maps_embed_url():
-    """Get Google Maps embed URL"""
     try:
         lat = request.args.get('lat', type=float)
         lon = request.args.get('lon', type=float)

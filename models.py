@@ -2,8 +2,6 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 
 db = SQLAlchemy()
-
-# Weather Database Model
 class WeatherRecord(db.Model):
     __tablename__ = 'weather_records'
     

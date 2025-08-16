@@ -15,14 +15,9 @@ class ExternalAPIService:
         self.google_places_base_url = 'https://maps.googleapis.com/maps/api/place'
     
     def get_youtube_videos(self, location: str, max_results: int = 5) -> Tuple[bool, Optional[List[Dict]], Optional[str]]:
-        """
-        Get YouTube videos related to the location
-        """
         try:
             if not self.youtube_api_key:
-                return False, None, "YouTube API key not configured"
-            
-            # Search for location-related videos
+                return False, None, "I failed"
             search_url = f"{self.youtube_base_url}/search"
             params = {
                 'part': 'snippet',
@@ -61,9 +56,6 @@ class ExternalAPIService:
             return False, None, f"YouTube videos error: {str(e)}"
     
     def get_google_maps_embed_url(self, latitude: float, longitude: float, zoom: int = 12) -> str:
-        """
-        Generate Google Maps embed URL
-        """
         try:
             if not self.google_maps_api_key:
                 return f"https://maps.google.com/maps?q={latitude},{longitude}&z={zoom}&output=embed"
@@ -74,23 +66,48 @@ class ExternalAPIService:
             # Fallback to basic embed URL
             return f"https://maps.google.com/maps?q={latitude},{longitude}&z={zoom}&output=embed"
     
-    def get_nearby_places(self, latitude: float, longitude: float, radius: int = 5000, 
-                         place_type: str = 'restaurant') -> Tuple[bool, Optional[List[Dict]], Optional[str]]:
+    def get_place_details(self, place_id: str) -> Tuple[bool, Optional[Dict], Optional[str]]:
         """
-        Get nearby places using Google Places API
+        Get detailed information about a specific place including phone number
         """
         try:
             if not self.google_places_api_key:
                 return False, None, "Google Places API key not configured"
             
-            # Search for nearby places using exact Google Places API format
+            details_url = f"{self.google_places_base_url}/details/json"
+            params = {
+                'place_id': place_id,
+                'fields': 'name,formatted_address,formatted_phone_number,website,rating,user_ratings_total,opening_hours,photos,reviews',
+                'key': self.google_places_api_key
+            }
+            
+            response = requests.get(details_url, params=params, timeout=10)
+            
+            if response.status_code != 200:
+                return False, None, f"Google Places Details API error: {response.status_code}"
+            
+            data = response.json()
+            place_details = data.get('result', {})
+            
+            return True, place_details, None
+            
+        except requests.exceptions.RequestException as e:
+            return False, None, f"Google Places Details API request error: {str(e)}"
+        except Exception as e:
+            return False, None, f"Place details error: {str(e)}"
+
+    def get_nearby_places(self, latitude: float, longitude: float, radius: int = 5000, 
+                         place_type: str = 'restaurant') -> Tuple[bool, Optional[List[Dict]], Optional[str]]:
+        try:
+            if not self.google_places_api_key:
+                return False, None, "Google Places API key not configured"
             search_url = f"{self.google_places_base_url}/nearbysearch/json"
             params = {
                  'location': f"{latitude},{longitude}",
                  'radius': radius,
                  'type': place_type,
                  'key': self.google_places_api_key,
-                 'rankby': 'prominence'  # This will sort by prominence (most reviewed/popular first)
+                 'rankby': 'prominence' 
              }
             
             response = requests.get(search_url, params=params, timeout=10)
@@ -101,27 +118,31 @@ class ExternalAPIService:
             data = response.json()
             places = []
             
-            # Limit results to 10 places
             for place in data.get('results', [])[:10]:
-                # Get photo URL if available
                 photo_url = None
                 if place.get('photos') and len(place['photos']) > 0:
                     photo_reference = place['photos'][0]['photo_reference']
                     photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference={photo_reference}&key={self.google_places_api_key}"
                 
+                place_details = {}
+                if place.get('place_id'):
+                    is_valid, details, error = self.get_place_details(place.get('place_id'))
+                    if is_valid:
+                        place_details = details
+                
                 place_info = {
                      'place_id': place.get('place_id'),
                      'name': place.get('name'),
-                     'formatted_address': place.get('vicinity'),  # Use vicinity as formatted_address
+                     'formatted_address': place.get('vicinity'),
                      'rating': place.get('rating'),
                      'user_ratings_total': place.get('user_ratings_total'),
                      'types': place.get('types', []),
                      'geometry': place.get('geometry', {}),
                      'photos': place.get('photos', []),
-                     'photo_url': photo_url,  # Add the actual photo URL
-                     'formatted_phone_number': place.get('formatted_phone_number'),
-                     'website': place.get('website'),
-                     'opening_hours': place.get('opening_hours', {})
+                     'photo_url': photo_url,
+                     'formatted_phone_number': place_details.get('formatted_phone_number'),
+                     'website': place_details.get('website'),
+                     'opening_hours': place_details.get('opening_hours', {})
                 }
                 places.append(place_info)
             
@@ -136,9 +157,6 @@ class ExternalAPIService:
     
     def get_multiple_place_types(self, latitude: float, longitude: float, 
                                 place_types: List[str] = None) -> Dict[str, List[Dict]]:
-        """
-        Get multiple types of nearby places
-        """
         if place_types is None:
             place_types = ['restaurant', 'hospital', 'lodging']
         
@@ -157,9 +175,6 @@ class ExternalAPIService:
 
     
     def get_reverse_geocoding(self, latitude: float, longitude: float) -> Tuple[bool, Optional[Dict], Optional[str]]:
-        """
-        Get reverse geocoding information from coordinates
-        """
         try:
             if not self.google_maps_api_key:
                 return False, None, "Google Maps API key not configured"

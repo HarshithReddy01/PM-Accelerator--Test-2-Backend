@@ -17,9 +17,6 @@ class ExportService:
         self.styles = getSampleStyleSheet()
     
     def export_to_json(self, records: List[WeatherRecord]) -> str:
-        """
-        Export weather records to JSON format
-        """
         try:
             data = []
             for record in records:
@@ -42,9 +39,6 @@ class ExportService:
             raise Exception(f"JSON export error: {str(e)}")
     
     def export_to_csv(self, records: List[WeatherRecord]) -> str:
-        """
-        Export weather records to CSV format
-        """
         try:
             output = StringIO()
             writer = csv.writer(output)
@@ -56,7 +50,6 @@ class ExportService:
                 'Current Temp', 'Current Humidity', 'Forecast Count'
             ])
             
-            # Write data rows
             for record in records:
                 current_temp = "N/A"
                 current_humidity = "N/A"
@@ -94,9 +87,6 @@ class ExportService:
             raise Exception(f"CSV export error: {str(e)}")
     
     def export_to_xml(self, records: List[WeatherRecord]) -> str:
-        """
-        Export weather records to XML format
-        """
         try:
             root = ET.Element("weather_records")
             root.set("export_date", datetime.now().isoformat())
@@ -105,7 +95,7 @@ class ExportService:
             for record in records:
                 record_elem = ET.SubElement(root, "record")
                 
-                # Basic record info
+                # record info
                 ET.SubElement(record_elem, "id").text = str(record.id)
                 ET.SubElement(record_elem, "location").text = record.location
                 ET.SubElement(record_elem, "start_date").text = record.start_date
@@ -113,7 +103,6 @@ class ExportService:
                 ET.SubElement(record_elem, "latitude").text = str(record.latitude)
                 ET.SubElement(record_elem, "longitude").text = str(record.longitude)
                 
-                # Timestamps
                 created_elem = ET.SubElement(record_elem, "created_at")
                 if record.created_at:
                     created_elem.text = record.created_at.isoformat()
@@ -122,7 +111,7 @@ class ExportService:
                 if record.updated_at:
                     updated_elem.text = record.updated_at.isoformat()
                 
-                # Weather data summary
+                # summariy
                 if record.temperature_data:
                     weather_elem = ET.SubElement(record_elem, "weather_summary")
                     
@@ -139,7 +128,6 @@ class ExportService:
                             forecast_elem = ET.SubElement(weather_elem, "forecast")
                             ET.SubElement(forecast_elem, "total_periods").text = str(len(forecast['list']))
             
-            # Create XML string with proper formatting
             ET.indent(root, space="  ")
             return ET.tostring(root, encoding='unicode', method='xml')
             
@@ -154,14 +142,12 @@ class ExportService:
             buffer = BytesIO()
             doc = SimpleDocTemplate(buffer, pagesize=letter)
             elements = []
-            
-            # Title
             title_style = ParagraphStyle(
                 'CustomTitle',
                 parent=self.styles['Heading1'],
                 fontSize=18,
                 spaceAfter=30,
-                alignment=1,  # Center alignment
+                alignment=1,
                 textColor=colors.darkblue
             )
             title = Paragraph("🌤️ Weather Records Report", title_style)
@@ -174,14 +160,13 @@ class ExportService:
                 fontSize=12,
                 spaceAfter=20
             )
-            summary_text = f"📅 Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}<br/>"
-            summary_text += f"📊 Total Records: {len(records)}<br/>"
-            summary_text += f"🌍 Weather data from OpenWeather API"
+            summary_text = f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}<br/>"
+            summary_text += f"Total Records: {len(records)}<br/>"
+            summary_text += f"Weather data from OpenWeather API"
             summary = Paragraph(summary_text, summary_style)
             elements.append(summary)
             elements.append(Spacer(1, 30))
             
-            # Table data with more information
             table_data = [['ID', 'Location', 'Date Range', 'Coordinates', 'Created']]
             
             for record in records:
@@ -197,7 +182,7 @@ class ExportService:
                     created
                 ])
             
-            # Create table
+            # C
             table = Table(table_data, colWidths=[0.5*inch, 2*inch, 1.5*inch, 1.5*inch, 1*inch])
             table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
@@ -215,24 +200,22 @@ class ExportService:
             elements.append(table)
             elements.append(Spacer(1, 30))
             
-            # Detailed weather information for each record
             for i, record in enumerate(records, 1):
                 elements.append(Paragraph(f"📋 Record {i}: {record.location}", self.styles['Heading2']))
                 elements.append(Spacer(1, 10))
                 
                 # Basic record info
                 basic_info = f"📍 Location: {record.location}<br/>"
-                basic_info += f"📅 Date Range: {record.start_date} to {record.end_date}<br/>"
-                basic_info += f"🌍 Coordinates: {record.latitude:.4f}, {record.longitude:.4f}<br/>"
-                basic_info += f"📊 Created: {record.created_at.strftime('%Y-%m-%d %H:%M') if record.created_at else 'N/A'}"
+                basic_info += f"Date Range: {record.start_date} to {record.end_date}<br/>"
+                basic_info += f"Coordinates: {record.latitude:.4f}, {record.longitude:.4f}<br/>"
+                basic_info += f"Created: {record.created_at.strftime('%Y-%m-%d %H:%M') if record.created_at else 'N/A'}"
                 elements.append(Paragraph(basic_info, self.styles['Normal']))
                 elements.append(Spacer(1, 15))
                 
-                # Weather data details
+                #  details
                 if record.temperature_data:
                     weather_info = "🌤️ Weather Data:<br/>"
                     
-                    # Current weather
                     if 'current' in record.temperature_data:
                         current = record.temperature_data['current']
                         if 'main' in current:
@@ -250,15 +233,13 @@ class ExportService:
                             wind = current['wind']
                             weather_info += f"💨 Wind Speed: {wind.get('speed', 'N/A')} m/s<br/>"
                             weather_info += f"🧭 Wind Direction: {wind.get('deg', 'N/A')}°<br/>"
-                    
-                    # Forecast data
+        
                     if 'forecast' in record.temperature_data:
                         forecast = record.temperature_data['forecast']
                         if 'list' in forecast:
                             forecast_list = forecast['list']
                             weather_info += f"📈 Forecast Periods: {len(forecast_list)}<br/>"
                             
-                            # Show first few forecast entries
                             if forecast_list:
                                 weather_info += "<br/>📅 Sample Forecast Data:<br/>"
                                 for j, forecast_item in enumerate(forecast_list[:5], 1):
@@ -269,15 +250,14 @@ class ExportService:
                     
                     elements.append(Paragraph(weather_info, self.styles['Normal']))
                 else:
-                    elements.append(Paragraph("❌ No weather data available", self.styles['Normal']))
+                    elements.append(Paragraph("No weather data available", self.styles['Normal']))
                 
                 elements.append(Spacer(1, 20))
                 
-                # Add page break if not the last record
                 if i < len(records):
                     elements.append(PageBreak())
             
-            # Footer
+            
             footer_style = ParagraphStyle(
                 'Footer',
                 parent=self.styles['Normal'],
@@ -289,7 +269,7 @@ class ExportService:
             elements.append(Spacer(1, 20))
             elements.append(footer)
             
-            # Build PDF
+            
             doc.build(elements)
             buffer.seek(0)
             return buffer.getvalue()
@@ -298,13 +278,11 @@ class ExportService:
             raise Exception(f"PDF export error: {str(e)}")
     
     def export_to_markdown(self, records: List[WeatherRecord]) -> str:
-        """
-        Export weather records to Markdown format
-        """
+        
         try:
             markdown = []
             
-            # Header
+            
             markdown.append("# Weather Records Report")
             markdown.append(f"**Generated on:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             markdown.append(f"**Total Records:** {len(records)}")
