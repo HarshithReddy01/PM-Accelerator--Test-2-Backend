@@ -31,9 +31,7 @@ class WeatherService:
             return False, None, f"Location validation error: {str(e)}"
     
     def validate_date_range(self, start_date: str, end_date: str) -> Tuple[bool, Optional[str]]:
-        """
-        Validate date range constraints
-        """
+        
         try:
             start = datetime.strptime(start_date, '%Y-%m-%d').date()
             end = datetime.strptime(end_date, '%Y-%m-%d').date()
@@ -57,7 +55,7 @@ class WeatherService:
     
     def fetch_weather_data(self, lat: float, lon: float, start_date: str, end_date: str) -> Tuple[bool, Optional[Dict], Optional[str]]:
         try:
-            # Get current weather
+
             current_response = requests.get(
                 f"{self.openweather_base_url}/weather",
                 params={
@@ -228,7 +226,7 @@ class WeatherService:
         return weather_desc.title()
 
     def get_hourly_forecast(self, location: str, date: str = None) -> Tuple[bool, Optional[Dict], Optional[str]]:
-        """Get true hourly forecast data (every hour) for a location"""
+        
         try:
             is_valid, location_data, error = self.validate_location(location)
             if not is_valid:
@@ -237,7 +235,7 @@ class WeatherService:
             if not date:
                 date = datetime.now().strftime('%Y-%m-%d')
             
-            # Get current weather and 5-day forecast
+            
             is_valid, weather_data, error = self.fetch_weather_data(
                 location_data['latitude'],
                 location_data['longitude'],
@@ -247,7 +245,7 @@ class WeatherService:
             if not is_valid:
                 return False, None, error
             
-            # Extract hourly data from the 3-hour forecast and interpolate
+            
             forecast_list = weather_data.get('forecast', {}).get('list', [])
             hourly_data = self._interpolate_to_hourly(forecast_list, date)
             
@@ -266,9 +264,9 @@ class WeatherService:
             return False, None, f"Hourly forecast error: {str(e)}"
 
     def get_hourly_forecast_by_coordinates(self, lat: float, lon: float) -> Tuple[bool, Optional[Dict], Optional[str]]:
-        """Get true hourly forecast data for coordinates"""
+        
         try:
-            # Get current weather and 5-day forecast
+            
             is_valid, weather_data, error = self.fetch_weather_data(
                 lat, lon,
                 datetime.now().strftime('%Y-%m-%d'),
@@ -277,7 +275,7 @@ class WeatherService:
             if not is_valid:
                 return False, None, error
             
-            # Extract hourly data from the 3-hour forecast and interpolate
+            
             forecast_list = weather_data.get('forecast', {}).get('list', [])
             hourly_data = self._interpolate_to_hourly(forecast_list, datetime.now().strftime('%Y-%m-%d'))
             
@@ -296,13 +294,13 @@ class WeatherService:
             return False, None, f"Hourly forecast error: {str(e)}"
 
     def _interpolate_to_hourly(self, forecast_list: List[Dict], target_date: str) -> List[Dict]:
-        """Convert 3-hour forecast data to hourly data by interpolation"""
+        
         hourly_data = []
         
         if not forecast_list:
             return hourly_data
         
-        # Group forecasts by date
+        
         forecasts_by_date = {}
         for item in forecast_list:
             dt = datetime.fromtimestamp(item['dt'])
@@ -320,20 +318,20 @@ class WeatherService:
                 'uvi': item.get('uvi', 0)
             })
         
-        # Get forecasts for the target date
+        
         target_forecasts = forecasts_by_date.get(target_date, [])
         
         if not target_forecasts:
             return hourly_data
         
-        # Sort forecasts by time
+        
         target_forecasts.sort(key=lambda x: x['dt'])
         
-        # Generate hourly data for the target date
+        
         for hour in range(24):
             hour_dt = datetime.strptime(f"{target_date} {hour:02d}:00:00", "%Y-%m-%d %H:%M:%S")
             
-            # Find the closest forecast data
+            
             closest_forecast = None
             min_diff = float('inf')
             
