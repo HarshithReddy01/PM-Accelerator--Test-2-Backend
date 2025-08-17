@@ -63,6 +63,8 @@ backend/
 - **WeatherRecord**: Stores weather data with location, dates, and temperature information
 - **Fields**: id, location, latitude, longitude, start_date, end_date, temperature_data, created_at, updated_at
 
+### Database connected to RDS MySQL Database in AWS.
+
 ## Prerequisites
 
 Before running this application, ensure you have:
@@ -71,8 +73,8 @@ Before running this application, ensure you have:
 - MySQL or PostgreSQL database
 - API keys for external services:
   - OpenWeatherMap API key
-  - Google Places API key (optional)
-  - YouTube Data API key (optional)
+  - Google Places API key
+  - YouTube Data API key
 
 ## Installation
 
@@ -97,23 +99,11 @@ Before running this application, ensure you have:
    ```bash
    pip install -r requirements.txt
    ```
+Clone -> Install python -> Install Dependencies -> python app.py (Terminal)
 
-4. **Environment Configuration**
-   Create a `.env` file in the backend directory:
-   ```env
-   DATABASE_URL=mysql+pymysql://username:password@localhost/weather_db
-   OPENWEATHER_API_KEY=your_openweather_api_key
-   GOOGLE_PLACES_API_KEY=your_google_places_api_key
-   YOUTUBE_API_KEY=your_youtube_api_key
-   CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-   ```
+Also clone the frontend (Backend and frontend should run simultaneously, as I showed in my video)
 
-5. **Database Setup**
-   ```bash
-   # Create database
-   mysql -u root -p
-   CREATE DATABASE weather_db;
-   ```
+Install React -> Clone -> Install Dependencies -> Start the server (npm start) -> Results
 
 ## Running the Application
 
@@ -200,19 +190,6 @@ To test the API endpoints:
    curl -X GET http://localhost:5000/api/health
    ```
 
-## Deployment
-
-### Using Gunicorn
-```bash
-gunicorn -c gunicorn.conf.py wsgi:app
-```
-
-### Using Docker (if Dockerfile is provided)
-```bash
-docker build -t weather-backend .
-docker run -p 5000:5000 weather-backend
-```
-
 ## Troubleshooting
 
 ### Common Issues
@@ -248,4 +225,12 @@ This project is licensed under the MIT License.
 
 ## Support
 
-For support and questions, please contact the development team or create an issue in the repository.
+For support and questions, please contact harshithreddy0117@gmail.com
+
+I wanted to let you know that I did manage to deploy my weather backend to AWS, but after deployment I ran into an issue. The backend itself runs fine, I can see the responses in the console, but the problem is that EC2 blocks the API calls because they are served over HTTP while EC2 expects HTTPS. Because of that, the frontend cannot pull the data even though the backend is working.
+
+Before deployment I should have taken care of configuring HTTPS (by attaching a custom domain and SSL certificate), but that requires purchasing a domain and setting up additional permissions, which I didn’t have the time to complete within the given deadline. I actually went a step further and integrated Docker, created an image, and hosted the container on EC2 successfully. So the service is technically running, just not accessible from the frontend due to the HTTP/HTTPS mismatch.
+
+Since the deadline is close, I decided to remove the Docker/EC2 setup for the submission and run the backend locally instead. This way, you can clone the repository and test it on your machine without worrying about HTTPS or EC2 restrictions. The local version works smoothly and demonstrates all the required functionality.
+
+I want to thank you again for the opportunity. I know I went beyond the basic requirements by trying Docker + AWS deployment, and even though it didn’t fully work out on EC2 due to the HTTPS issue, the local version shows the complete implementation.
