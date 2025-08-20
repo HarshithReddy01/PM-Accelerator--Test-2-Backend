@@ -1,0 +1,96 @@
+name: Deploy Backend to EC2
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'b/**'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'b/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Login to Docker Hub (optional)
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+      
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./b
+        push: true
+        tags: |
+          harshithreddy01/weather-backend:latest
+          harshithreddy01/weather-backend:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+      
+    - name: Deploy to EC2
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USERNAME }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        port: ${{ secrets.EC2_PORT }}
+        script: |
+          # Update Docker image
+          docker pull harshithreddy01/weather-backend:latest
+          
+          # Stop existing container
+          docker stop weather-backend || true
+          docker rm weather-backend || true
+          
+          # Run new container
+          docker run -d \
+            --name weather-backend \
+            --restart unless-stopped \
+            -p 5000:5000 \
+            -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+            -e OPENWEATHER_API_KEY="${{ secrets.OPENWEATHER_API_KEY }}" \
+            -e GOOGLE_PLACES_API_KEY="${{ secrets.GOOGLE_PLACES_API_KEY }}" \
+            -e YOUTUBE_API_KEY="${{ secrets.YOUTUBE_API_KEY }}" \
+            -e GOOGLE_MAPS_API_KEY="${{ secrets.GOOGLE_MAPS_API_KEY }}" \
+            -e CORS_ORIGINS="${{ secrets.CORS_ORIGINS }}" \
+            harshithreddy01/weather-backend:latest
+          
+          # Clean up old images
+          docker image prune -f
+          
+                     # Health check with timer
+           echo "⏳ Waiting for application to start (60 seconds)..."
+           for i in {1..60}; do
+             if curl -f http://localhost:5000/health > /dev/null 2>&1; then
+               echo "✅ Application is running! (after $i seconds)"
+               break
+             fi
+             if [ $i -eq 60 ]; then
+               echo "❌ Application failed to start within 60 seconds"
+               exit 1
+             fi
+             echo -n "."
+             sleep 1
+           done
+          
+    - name: Notify deployment status
+      if: always()
+      run: |
+        if [ ${{ job.status }} == 'success' ]; then
+          echo "✅ Backend deployed successfully to EC2"
+          echo "🌐 Backend URL: https://wther.paninsight.org"
+        else
+          echo "❌ Backend deployment failed"
+          exit 1
+        fi

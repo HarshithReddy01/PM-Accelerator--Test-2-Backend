@@ -7,7 +7,7 @@ from io import BytesIO
 from models import db, WeatherRecord
 from services import WeatherService, ExportService, ExternalAPIService
 
-#Im getting .env
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -21,6 +21,14 @@ allowed_origins = [
     "http://127.0.0.1:3001",  
     "http://localhost:5000",  
     "http://127.0.0.1:5000",  
+    "http://wther.paninsight.org:3000",
+    "http://wther.paninsight.org:5000",
+    "https://wther.paninsight.org",
+    "https://HarshithReddy01.github.io",
+    "https://harshithreddy01.github.io",
+    "https://github.com/HarshithReddy01/PM-Accelerator--Test-2-Frontend-new",
+    "https://HarshithReddy01.github.io/PM-Accelerator--Test-2-Frontend-new",
+    "https://harshithreddy01.github.io/PM-Accelerator--Test-2-Frontend-new",
 ]
 
 
@@ -48,11 +56,11 @@ def after_request(response):
 
 # Database configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_recycle': 300,
-    'pool_pre_ping': True
-}
+app.config.setdefault("SQLALCHEMY_TRACK_MODIFICATIONS", False)
+app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {
+    "pool_pre_ping": True,
+    "pool_recycle": 280
+})
 db.init_app(app)
 weather_service = WeatherService()
 export_service = ExportService()
@@ -94,6 +102,10 @@ def health_check():
             'error': str(e),
             'timestamp': datetime.utcnow().isoformat()
         }), 500
+
+@app.route("/health")
+def health():
+    return {"status": "ok"}, 200
 
 @app.route('/api/weather', methods=['POST'])
 def create_weather_record():
