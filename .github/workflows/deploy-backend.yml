@@ -32,7 +32,7 @@ jobs:
       - name: Build & Push image (backend in ./b)
         uses: docker/build-push-action@v5
         with:
-          context: ./b
+          context: .
           push: true
           tags: |
             harshithreddy01/weather-backend:latest
