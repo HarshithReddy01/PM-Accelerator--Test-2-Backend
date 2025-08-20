@@ -1,0 +1,118 @@
+name: Deploy Backend to EC2
+
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'b/**'
+      - '.github/workflows/deploy-backend.yml'
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'b/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build & Push image (backend in ./b)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            harshithreddy01/weather-backend:latest
+            harshithreddy01/weather-backend:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # very imp. step here Im dng docker compose on ec2
+      - name: Deploy to EC2 with Compose
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_PORT }}
+          script: |
+            set -e
+
+            # Ensure deploy dir
+            sudo mkdir -p /opt/weather
+            sudo chown -R $USER:$USER /opt/weather
+
+            # Write/refresh .env on the server from secrets
+            cat > /opt/weather/.env << 'EOF'
+            FLASK_ENV=production
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            OPENWEATHER_API_KEY=${{ secrets.OPENWEATHER_API_KEY }}
+            GOOGLE_PLACES_API_KEY=${{ secrets.GOOGLE_PLACES_API_KEY }}
+            GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}
+            YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}
+            CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}
+            EOF
+            chmod 600 /opt/weather/.env
+
+            # Create/refresh Compose file on the server
+            # (remove 'version:' to avoid the warning on Compose v2)
+            cat > /opt/weather/docker-compose.prod.yml << 'EOF'
+            services:
+              weather-backend:
+                image: harshithreddy01/weather-backend:latest
+                container_name: weather-backend
+                restart: unless-stopped
+                env_file:
+                  - /opt/weather/.env
+                ports:
+                  - "5000:5000"
+                healthcheck:
+                  test: ["CMD", "curl", "-fsS", "http://localhost:5000/health"]
+                  interval: 30s
+                  timeout: 5s
+                  retries: 3
+                  start_period: 15s
+            EOF
+
+            # Pull & restart via compose
+            docker login -u "${{ secrets.DOCKER_USERNAME }}" -p "${{ secrets.DOCKER_PASSWORD }}"
+            cd /opt/weather
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            docker image prune -f
+
+            # Health check loop
+            echo "⏳ Waiting for application health..."
+            for i in {1..60}; do
+              if curl -fsS http://localhost:5000/health >/dev/null 2>&1; then
+                echo "✅ Application is healthy (after $i seconds)"
+                exit 0
+              fi
+              sleep 1
+            done
+            echo "❌ Healthcheck failed"
+            exit 1
+
+      - name: Notify deployment status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Backend deployed successfully to EC2"
+            echo "🌐 Backend URL: https://wther.paninsight.org"
+          else
+            echo "❌ Backend deployment failed"
+            exit 1
+          fi

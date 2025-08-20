@@ -7,19 +7,57 @@ from io import BytesIO
 from models import db, WeatherRecord
 from services import WeatherService, ExportService, ExternalAPIService
 
-#Im getting .env
+
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
 
-# Database configuration
+
+
+allowed_origins = [
+    "http://localhost:3000",  
+    "http://localhost:3001",  
+    "http://127.0.0.1:3000",    
+    "http://127.0.0.1:3001",  
+    "http://localhost:5000",  
+    "http://127.0.0.1:5000",  
+    "http://wther.paninsight.org:3000",
+    "http://wther.paninsight.org:5000",
+    "https://wther.paninsight.org",
+    "https://HarshithReddy01.github.io",
+    "https://harshithreddy01.github.io",
+    "https://github.com/HarshithReddy01/PM-Accelerator--Test-2-Frontend-new",
+    "https://HarshithReddy01.github.io/PM-Accelerator--Test-2-Frontend-new",
+    "https://harshithreddy01.github.io/PM-Accelerator--Test-2-Frontend-new",
+]
+
+
+custom_origins = os.getenv('CORS_ORIGINS', '').split(',') if os.getenv('CORS_ORIGINS') else []
+allowed_origins.extend([origin.strip() for origin in custom_origins if origin.strip()])
+
+
+CORS(app, 
+     origins=allowed_origins,
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+     supports_credentials=True,
+     max_age=3600)
+
+    
+@app.after_request
+def after_request(response):
+
+    response.headers.add('X-Content-Type-Options', 'nosniff')
+    response.headers.add('X-Frame-Options', 'DENY')
+    response.headers.add('X-XSS-Protection', '1; mode=block')
+    return response
+
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_recycle': 300,
-    'pool_pre_ping': True
-}
+app.config.setdefault("SQLALCHEMY_TRACK_MODIFICATIONS", False)
+app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {
+    "pool_pre_ping": True,
+    "pool_recycle": 280
+})
 db.init_app(app)
 weather_service = WeatherService()
 export_service = ExportService()
@@ -33,7 +71,6 @@ with app.app_context():
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
     try:
         db_connected = True
         try:
@@ -61,6 +98,10 @@ def health_check():
             'error': str(e),
             'timestamp': datetime.utcnow().isoformat()
         }), 500
+
+@app.route("/health")
+def health():
+    return {"status": "ok"}, 200
 
 @app.route('/api/weather', methods=['POST'])
 def create_weather_record():
@@ -318,6 +359,50 @@ def get_todays_weather_by_coordinates():
             location_name = f"{lat},{lon}"
         
         is_valid, data, error = weather_service.get_todays_weather_3hour(location_name)
+        
+        if not is_valid:
+            return jsonify({'error': error}), 400
+        
+        return jsonify(data), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
+
+@app.route('/api/hourly/<int:record_id>')
+def get_hourly_forecast_by_record(record_id):
+    try:
+        record = WeatherRecord.query.get(record_id)
+        if not record:
+            return jsonify({'error': 'Weather record not found'}), 404
+        
+        date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
+        
+        is_valid, data, error = weather_service.get_hourly_forecast(record.location, date)
+        
+        if not is_valid:
+            return jsonify({'error': error}), 400
+        
+        return jsonify(data), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
+
+@app.route('/api/hourly/direct')
+def get_hourly_forecast_direct():
+    try:
+        lat = request.args.get('lat')
+        lon = request.args.get('lon')
+        
+        if not lat or not lon:
+            return jsonify({'error': 'Missing latitude or longitude parameters'}), 400
+        
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except ValueError:
+            return jsonify({'error': 'Invalid latitude or longitude values'}), 400
+        
+        is_valid, data, error = weather_service.get_hourly_forecast_by_coordinates(lat, lon)
         
         if not is_valid:
             return jsonify({'error': error}), 400

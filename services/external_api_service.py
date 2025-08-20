@@ -63,13 +63,9 @@ class ExternalAPIService:
             return f"https://www.google.com/maps/embed/v1/view?key={self.google_maps_api_key}&center={latitude},{longitude}&zoom={zoom}"
             
         except Exception as e:
-            # Fallback to basic embed URL
             return f"https://maps.google.com/maps?q={latitude},{longitude}&z={zoom}&output=embed"
     
     def get_place_details(self, place_id: str) -> Tuple[bool, Optional[Dict], Optional[str]]:
-        """
-        Get detailed information about a specific place including phone number
-        """
         try:
             if not self.google_places_api_key:
                 return False, None, "Google Places API key not configured"
