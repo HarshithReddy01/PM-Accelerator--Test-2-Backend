@@ -1,659 +1,110 @@
 from flask import Flask, request, jsonify, send_file
-from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
-from datetime import datetime, timedelta
-import requests
-import json
-import csv
-import io
-import xml.etree.ElementTree as ET
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
-from reportlab.lib.styles import getSampleStyleSheet
+from datetime import datetime
 import os
 from dotenv import load_dotenv
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
+from io import BytesIO
+from models import db, WeatherRecord
+from services import WeatherService, ExportService, ExternalAPIService
 
-# Load environment variables
+
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
 
-# Database configuration
+
+
+allowed_origins = [
+    "http://localhost:3000",  
+    "http://localhost:3001",  
+    "http://127.0.0.1:3000",    
+    "http://127.0.0.1:3001",  
+    "http://localhost:5000",  
+    "http://127.0.0.1:5000",  
+    "http://wther.paninsight.org:3000",
+    "http://wther.paninsight.org:5000",
+    "https://wther.paninsight.org",
+    "https://HarshithReddy01.github.io",
+    "https://harshithreddy01.github.io",
+    "https://github.com/HarshithReddy01/PM-Accelerator--Test-2-Frontend-new",
+    "https://HarshithReddy01.github.io/PM-Accelerator--Test-2-Frontend-new",
+    "https://harshithreddy01.github.io/PM-Accelerator--Test-2-Frontend-new",
+]
+
+
+custom_origins = os.getenv('CORS_ORIGINS', '').split(',') if os.getenv('CORS_ORIGINS') else []
+allowed_origins.extend([origin.strip() for origin in custom_origins if origin.strip()])
+
+
+CORS(app, 
+     origins=allowed_origins,
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+     supports_credentials=True,
+     max_age=3600)
+
+    
+@app.after_request
+def after_request(response):
+
+    response.headers.add('X-Content-Type-Options', 'nosniff')
+    response.headers.add('X-Frame-Options', 'DENY')
+    response.headers.add('X-XSS-Protection', '1; mode=block')
+    return response
+
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_recycle': 300,
-    'pool_pre_ping': True
-}
-db = SQLAlchemy(app)
-
-# Google Maps Platform API Keys
-GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY')
-GOOGLE_PLACES_API_KEY = os.getenv('GOOGLE_PLACES_API_KEY')
-
-# OpenWeather API Key
-OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
-
-# YouTube API Key
-YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
-
-# API Base URLs
-OPENWEATHER_BASE_URL = "https://api.openweathermap.org/data/2.5"
-GOOGLE_PLACES_BASE_URL = "https://maps.googleapis.com/maps/api/place"
-
-# Weather Database Model
-class WeatherRecord(db.Model):
-    __tablename__ = 'weather_records'
-    
-    id = db.Column(db.Integer, primary_key=True)
-    location = db.Column(db.String(255), nullable=False)
-    latitude = db.Column(db.Float)
-    longitude = db.Column(db.Float)
-    start_date = db.Column(db.Date, nullable=False)
-    end_date = db.Column(db.Date, nullable=False)
-    temperature_data = db.Column(db.JSON)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-def validate_date_range(start_date, end_date):
-    """Validate date range"""
+app.config.setdefault("SQLALCHEMY_TRACK_MODIFICATIONS", False)
+app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {
+    "pool_pre_ping": True,
+    "pool_recycle": 280
+})
+db.init_app(app)
+weather_service = WeatherService()
+export_service = ExportService()
+external_api_service = ExternalAPIService()
+with app.app_context():
     try:
-        start = datetime.strptime(start_date, '%Y-%m-%d').date()
-        end = datetime.strptime(end_date, '%Y-%m-%d').date()
-        
-        if start > end:
-            return False, "Start date cannot be after end date"
-        
-        if start < datetime.now().date() - timedelta(days=365):
-            return False, "Start date cannot be more than 1 year in the past"
-        
-        if end > datetime.now().date() + timedelta(days=7):
-            return False, "End date cannot be more than 7 days in the future"
-        
-        return True, (start, end)
-    except ValueError:
-        return False, "Invalid date format. Use YYYY-MM-DD"
-
-def validate_location(location):
-    """Validate and geocode location"""
-    try:
-        geolocator = Nominatim(user_agent="weather_app")
-        location_data = geolocator.geocode(location, timeout=10)
-        
-        if location_data:
-            return True, {
-                'latitude': location_data.latitude,
-                'longitude': location_data.longitude,
-                'address': location_data.address
-            }
-        else:
-            return False, "Location not found"
-    except (GeocoderTimedOut, GeocoderUnavailable):
-        return False, "Location service unavailable"
-
-
-
-
-
-
-
-def get_weather_data(lat, lon, start_date, end_date):
-    """Fetch weather data for a location and date range using OpenWeather API"""
-    if not OPENWEATHER_API_KEY:
-        return None, "OpenWeather API key not configured"
-    
-    try:
-        
-        # Get current weather
-        current_response = requests.get(
-            f"{OPENWEATHER_BASE_URL}/weather",
-            params={
-                'lat': lat,
-                'lon': lon,
-                'appid': OPENWEATHER_API_KEY,
-                'units': 'metric'
-            }
-        )
-        
-        if current_response.status_code != 200:
-            return None, f"OpenWeather API current weather error: {current_response.status_code}"
-        
-        current_data = current_response.json()
-
-        # Get 5-day forecast (OpenWeather provides 3-hour intervals for 5 days)
-        # Try multiple approaches to get maximum data
-        forecast_response = requests.get(
-            f"{OPENWEATHER_BASE_URL}/forecast",
-            params={
-                'lat': lat,
-                'lon': lon,
-                'appid': OPENWEATHER_API_KEY,
-                'units': 'metric'
-            }
-        )
-        
-        # If the first request doesn't give enough data, try with cnt parameter
-        if forecast_response.status_code == 200:
-            forecast_data = forecast_response.json()
-            if len(forecast_data.get('list', [])) < 40:
-                print(f"First request returned {len(forecast_data.get('list', []))} items, trying with cnt parameter...")
-                # Try again with cnt parameter to get maximum data points
-                forecast_response = requests.get(
-                    f"{OPENWEATHER_BASE_URL}/forecast",
-                    params={
-                        'lat': lat,
-                        'lon': lon,
-                        'appid': OPENWEATHER_API_KEY,
-                        'units': 'metric',
-                        'cnt': 40  # Request maximum data points
-                    }
-                )
-        
-        if forecast_response.status_code != 200:
-            return None, f"OpenWeather API forecast error: {forecast_response.status_code}"
-        
-        forecast_data = forecast_response.json()
-        
-        # Debug: Log the forecast data structure
-        print(f"OpenWeather API response - Total forecast items: {len(forecast_data.get('list', []))}")
-        if forecast_data.get('list'):
-            first_item = forecast_data['list'][0]
-            last_item = forecast_data['list'][-1]
-            print(f"First forecast: {first_item.get('dt_txt')} - {datetime.fromtimestamp(first_item.get('dt'))}")
-            print(f"Last forecast: {last_item.get('dt_txt')} - {datetime.fromtimestamp(last_item.get('dt'))}")
-            
-            # Check if we have enough data for 5 days
-            forecast_dates = set()
-            for item in forecast_data.get('list', []):
-                forecast_date = datetime.fromtimestamp(item.get('dt')).date()
-                forecast_dates.add(forecast_date)
-            
-            print(f"Unique forecast dates available: {len(forecast_dates)}")
-            print(f"Available dates: {sorted(forecast_dates)}")
-            
-            # Log the available dates for debugging
-            print(f"Available forecast dates: {sorted(forecast_dates)}")
-            if len(forecast_dates) < 6:
-                print(f"Warning: Only {len(forecast_dates)} unique dates available, may not have enough data for 5-day forecast")
-
-        # Convert OpenWeather API format to our expected format
-        current_weather = {
-            'name': current_data.get('name', 'Current Location'),
-            'sys': current_data.get('sys', {'country': 'US'}),
-            'coord': current_data.get('coord', {'lat': lat, 'lon': lon}),
-            'main': current_data.get('main', {}),
-            'weather': current_data.get('weather', []),
-            'wind': current_data.get('wind', {}),
-            'visibility': current_data.get('visibility', 0),
-            'dt': current_data.get('dt', int(datetime.now().timestamp()))
-        }
-
-        # Convert forecast data to our format (OpenWeather provides 3-hour intervals)
-        forecast_list = []
-        for forecast_item in forecast_data.get('list', []):
-            timestamp = forecast_item.get('dt')
-            if timestamp:
-                forecast_datetime = datetime.fromtimestamp(timestamp)
-                forecast_list.append({
-                    'dt': int(forecast_datetime.timestamp()),
-                    'main': forecast_item.get('main', {}),
-                    'weather': forecast_item.get('weather', []),
-                    'wind': forecast_item.get('wind', {}),
-                    'pop': forecast_item.get('pop', 0),
-                    'visibility': forecast_item.get('visibility', 0),
-                    'clouds': forecast_item.get('clouds', {}),
-                    'dt_txt': forecast_item.get('dt_txt', '')
-                })
-
-        # Convert hourly forecasts to our format (same as forecast data for OpenWeather)
-        hourly_list = []
-        for hourly_forecast in forecast_data.get('list', []):
-            timestamp = hourly_forecast.get('dt')
-            if timestamp:
-                hourly_datetime = datetime.fromtimestamp(timestamp)
-                hourly_item = {
-                    'dt': int(hourly_datetime.timestamp()),
-                    'main': hourly_forecast.get('main', {}),
-                    'weather': hourly_forecast.get('weather', []),
-                    'wind': hourly_forecast.get('wind', {}),
-                    'pop': hourly_forecast.get('pop', 0),
-                    'visibility': hourly_forecast.get('visibility', 0),
-                    'clouds': hourly_forecast.get('clouds', {}),
-                    'dt_txt': hourly_forecast.get('dt_txt', '')
-                }
-                hourly_list.append(hourly_item)
-
-        # Combine all weather data
-        weather_data = {
-            'current': current_weather,
-            'forecast': {'list': forecast_list},
-            'hourly': {'hourly': hourly_list, 'note': 'Using OpenWeather API 5-day forecast'},
-            'date_range': {
-                'start': start_date.isoformat(),
-                'end': end_date.isoformat()
-            }
-        }
-        
-        return weather_data, None
-        
+        db.create_all()
+        print("Database tables created successfully")
     except Exception as e:
-        return None, str(e)
+        print(f"Error creating database tables: {str(e)}")
 
-def get_hourly_weather_data(lat, lon):
-    """Fetch hourly weather data using OpenWeather One Call API 2.5"""
-    if not OPENWEATHER_API_KEY:
-        return None, "OpenWeather API key not configured"
-    
+@app.route('/api/health', methods=['GET'])
+def health_check():
     try:
-        # Use OpenWeather One Call API 2.5 for hourly forecasts
-        hourly_response = requests.get(
-            "https://api.openweathermap.org/data/2.5/onecall",
-            params={
-                'lat': lat,
-                'lon': lon,
-                'appid': OPENWEATHER_API_KEY,
-                'units': 'metric',
-                'exclude': 'current,minutely,daily,alerts'
-            }
-        )
+        db_connected = True
+        try:
+            db.session.execute("SELECT 1")
+        except:
+            db_connected = False
         
-        if hourly_response.status_code != 200:
-            return None, f"OpenWeather One Call API error: {hourly_response.status_code}"
-        
-        hourly_data = hourly_response.json()
-        
-        # Process hourly data
-        hourly_list = []
-        for hour_data in hourly_data.get('hourly', []):
-            timestamp = hour_data.get('dt')
-            if timestamp:
-                hourly_datetime = datetime.fromtimestamp(timestamp)
-                hourly_item = {
-                    'dt': int(hourly_datetime.timestamp()),
-                    'temp': hour_data.get('temp'),
-                    'feels_like': hour_data.get('feels_like'),
-                    'pressure': hour_data.get('pressure'),
-                    'humidity': hour_data.get('humidity'),
-                    'dew_point': hour_data.get('dew_point'),
-                    'uvi': hour_data.get('uvi'),
-                    'clouds': hour_data.get('clouds'),
-                    'visibility': hour_data.get('visibility'),
-                    'wind_speed': hour_data.get('wind_speed'),
-                    'wind_deg': hour_data.get('wind_deg'),
-                    'wind_gust': hour_data.get('wind_gust'),
-                    'weather': hour_data.get('weather', []),
-                    'pop': hour_data.get('pop'),
-                    'dt_txt': hourly_datetime.strftime('%Y-%m-%d %H:%M:%S')
-                }
-                hourly_list.append(hourly_item)
-        
-        return {
-            'hourly': hourly_list,
-            'timezone': hourly_data.get('timezone'),
-            'timezone_offset': hourly_data.get('timezone_offset'),
-            'note': 'Using OpenWeather One Call API 2.5 for hourly forecasts'
-        }, None
-        
-    except Exception as e:
-        return None, str(e)
-
-def get_most_descriptive_weather(forecasts):
-    """Get the most descriptive weather condition from forecasts"""
-    if not forecasts:
-        return None
-    
-    # Count weather descriptions
-    weather_counts = {}
-    for forecast in forecasts:
-        description = forecast.get('weather_description', '').lower()
-        if description:
-            # Skip generic terms like 'clouds', 'clear' and prefer more descriptive ones
-            if description not in ['clouds', 'clear', 'overcast']:
-                weather_counts[description] = weather_counts.get(description, 0) + 1
-    
-    # If no descriptive weather found, look for the most common weather_main
-    if not weather_counts:
-        main_counts = {}
-        for forecast in forecasts:
-            main = forecast.get('weather_main', '').lower()
-            if main:
-                main_counts[main] = main_counts.get(main, 0) + 1
-        
-        if main_counts:
-            most_common = max(main_counts, key=main_counts.get)
-            # Convert to more user-friendly terms
-            weather_map = {
-                'clear': 'Sunny',
-                'clouds': 'Partly Cloudy',
-                'rain': 'Rainy',
-                'snow': 'Snowy',
-                'thunderstorm': 'Stormy',
-                'drizzle': 'Light Rain',
-                'mist': 'Misty',
-                'fog': 'Foggy',
-                'haze': 'Hazy'
-            }
-            return weather_map.get(most_common, most_common.title())
-    
-    # Return the most common descriptive weather
-    if weather_counts:
-        most_common = max(weather_counts, key=weather_counts.get)
-        return most_common.title()
-    
-    return None
-
-def get_todays_weather_3hour(lat, lon):
-    """Fetch today's weather data with 3-hour intervals using OpenWeather free forecast API"""
-    if not OPENWEATHER_API_KEY:
-        return None, "OpenWeather API key not configured"
-    
-    try:
-        # Get current weather
-        current_response = requests.get(
-            f"{OPENWEATHER_BASE_URL}/weather",
-            params={
-                'lat': lat,
-                'lon': lon,
-                'appid': OPENWEATHER_API_KEY,
-                'units': 'metric'
-            }
-        )
-        
-        if current_response.status_code != 200:
-            return None, f"OpenWeather API current weather error: {current_response.status_code}"
-        
-        current_data = current_response.json()
-
-        # Get 5-day forecast (3-hour intervals) - this is the free API
-        forecast_response = requests.get(
-            f"{OPENWEATHER_BASE_URL}/forecast",
-            params={
-                'lat': lat,
-                'lon': lon,
-                'appid': OPENWEATHER_API_KEY,
-                'units': 'metric'
-            }
-        )
-        
-        if forecast_response.status_code != 200:
-            return None, f"OpenWeather API forecast error: {forecast_response.status_code}"
-        
-        forecast_data = forecast_response.json()
-
-        # Get today's date
-        today = datetime.now().date()
-        
-        # Filter forecast data for today only
-        todays_forecasts = []
-        for forecast_item in forecast_data.get('list', []):
-            timestamp = forecast_item.get('dt')
-            if timestamp:
-                forecast_datetime = datetime.fromtimestamp(timestamp)
-                if forecast_datetime.date() == today:
-                    todays_forecasts.append({
-                        'time': forecast_datetime.strftime('%H:%M'),
-                        'datetime': forecast_datetime.isoformat(),
-                        'timestamp': timestamp,
-                        'temperature': forecast_item.get('main', {}).get('temp'),
-                        'feels_like': forecast_item.get('main', {}).get('feels_like'),
-                        'humidity': forecast_item.get('main', {}).get('humidity'),
-                        'pressure': forecast_item.get('main', {}).get('pressure'),
-                        'weather_main': forecast_item.get('weather', [{}])[0].get('main'),
-                        'weather_description': forecast_item.get('weather', [{}])[0].get('description'),
-                        'weather_icon': forecast_item.get('weather', [{}])[0].get('icon'),
-                        'wind_speed': forecast_item.get('wind', {}).get('speed'),
-                        'wind_deg': forecast_item.get('wind', {}).get('deg'),
-                        'clouds': forecast_item.get('clouds', {}).get('all'),
-                        'pop': forecast_item.get('pop', 0),  # Probability of precipitation
-                        'visibility': forecast_item.get('visibility', 0)
-                    })
-
-        # Sort by time
-        todays_forecasts.sort(key=lambda x: x['timestamp'])
-
-        # Current weather data
-        current_weather = {
-            'location': current_data.get('name', 'Current Location'),
-            'country': current_data.get('sys', {}).get('country'),
-            'coordinates': {
-                'lat': current_data.get('coord', {}).get('lat'),
-                'lon': current_data.get('coord', {}).get('lon')
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.utcnow().isoformat(),
+            'database': {
+                'connected': db_connected,
+                'info': 'Flask-SQLAlchemy initialized'
             },
-            'current': {
-                'temperature': current_data.get('main', {}).get('temp'),
-                'feels_like': current_data.get('main', {}).get('feels_like'),
-                'humidity': current_data.get('main', {}).get('humidity'),
-                'pressure': current_data.get('main', {}).get('pressure'),
-                'weather_main': current_data.get('weather', [{}])[0].get('main'),
-                'weather_description': current_data.get('weather', [{}])[0].get('description'),
-                'weather_icon': current_data.get('weather', [{}])[0].get('icon'),
-                'wind_speed': current_data.get('wind', {}).get('speed'),
-                'wind_deg': current_data.get('wind', {}).get('deg'),
-                'clouds': current_data.get('clouds', {}).get('all'),
-                'visibility': current_data.get('visibility', 0),
-                'sunrise': current_data.get('sys', {}).get('sunrise'),
-                'sunset': current_data.get('sys', {}).get('sunset'),
-                'timestamp': current_data.get('dt')
+            'services': {
+                'weather_service': 'initialized',
+                'export_service': 'initialized',
+                'external_api_service': 'initialized',
+                'database_service': 'initialized'
             }
-        }
-
-        # Calculate today's summary
-        if todays_forecasts:
-            temps = [f['temperature'] for f in todays_forecasts if f['temperature'] is not None]
-            humidities = [f['humidity'] for f in todays_forecasts if f['humidity'] is not None]
-            
-            today_summary = {
-                'date': today.isoformat(),
-                'forecast_count': len(todays_forecasts),
-                'temperature_range': {
-                    'min': min(temps) if temps else None,
-                    'max': max(temps) if temps else None,
-                    'avg': sum(temps) / len(temps) if temps else None
-                },
-                'humidity_range': {
-                    'min': min(humidities) if humidities else None,
-                    'max': max(humidities) if humidities else None,
-                    'avg': sum(humidities) / len(humidities) if humidities else None
-                },
-                'most_common_weather': get_most_descriptive_weather(todays_forecasts) if todays_forecasts else None
-            }
-        else:
-            today_summary = {
-                'date': today.isoformat(),
-                'forecast_count': 0,
-                'note': 'No 3-hour forecasts available for today'
-            }
-
-        return {
-            'current_weather': current_weather,
-            'today_summary': today_summary,
-            'hourly_forecasts': todays_forecasts,
-            'api_info': {
-                'source': 'OpenWeather Free Forecast API',
-                'interval': '3-hour',
-                'data_points': len(todays_forecasts)
-            }
-        }, None
-        
+        }), 200
     except Exception as e:
-        return None, str(e)
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.utcnow().isoformat()
+        }), 500
 
-def get_youtube_videos(location, max_results=3):
-    """Get YouTube videos for the location"""
-    if not YOUTUBE_API_KEY:
-        return None, "YouTube API key not configured"
-    
-    try:
-        search_query = f"{location} weather travel"
-        response = requests.get(
-            'https://www.googleapis.com/youtube/v3/search',
-            params={
-                'part': 'snippet',
-                'q': search_query,
-                'type': 'video',
-                'maxResults': max_results,
-                'key': YOUTUBE_API_KEY,
-                'order': 'relevance',
-                'videoDuration': 'short'
-            },
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            return data.get('items', []), None
-        elif response.status_code == 403:
-            # Try to get more details about the 403 error
-            try:
-                error_data = response.json()
-                error_message = error_data.get('error', {}).get('message', 'Unknown 403 error')
-                return None, f"YouTube API 403 Forbidden: {error_message}"
-            except:
-                return None, "YouTube API 403 Forbidden: Check API key and quota limits"
-        else:
-            return None, f"YouTube API error: {response.status_code}"
-    except requests.exceptions.Timeout:
-        return None, "YouTube API request timed out"
-    except Exception as e:
-        return None, str(e)
-
-def get_google_maps_data(location):
-    """Get Google Maps data for the location"""
-    if not GOOGLE_MAPS_API_KEY:
-        return None, "Google Maps API key not configured"
-    
-    try:
-        # Geocoding API to get coordinates
-        geocode_response = requests.get(
-            'https://maps.googleapis.com/maps/api/geocode/json',
-            params={
-                'address': location,
-                'key': GOOGLE_MAPS_API_KEY
-            }
-        )
-        
-        if geocode_response.status_code == 200:
-            geocode_data = geocode_response.json()
-            if geocode_data['status'] == 'OK':
-                location_data = geocode_data['results'][0]
-                return {
-                    'formatted_address': location_data['formatted_address'],
-                    'geometry': location_data['geometry'],
-                    'place_id': location_data['place_id']
-                }, None
-            else:
-                return None, f"Geocoding error: {geocode_data['status']}"
-        else:
-            return None, f"Google Maps API error: {geocode_response.status_code}"
-    except Exception as e:
-        return None, str(e)
-
-def get_nearby_places(lat, lon, place_type, max_results=5):
-    """Get nearby places using Google Places API - optimized for performance"""
-    if not GOOGLE_PLACES_API_KEY:
-        return None, "Google Places API key not configured"
-    
-    try:
-        # Use legacy API but with optimized fields to get photos in one call
-        nearby_response = requests.get(
-            f"{GOOGLE_PLACES_BASE_URL}/nearbysearch/json",
-            params={
-                'location': f"{lat},{lon}",
-                'rankby': 'distance',
-                'type': place_type,
-                'key': GOOGLE_PLACES_API_KEY
-            }
-        )
-        
-        if nearby_response.status_code == 200:
-            nearby_data = nearby_response.json()
-            if nearby_data['status'] == 'OK':
-                places = nearby_data.get('results', [])
-                
-                # Filter places with ratings and sort by number of reviews (highest first)
-                rated_places = [p for p in places if p.get('rating') is not None and p.get('user_ratings_total', 0) > 0]
-                rated_places.sort(key=lambda x: (x.get('user_ratings_total', 0), x.get('rating', 0)), reverse=True)
-                
-                # Take top 5 by rating
-                top_places = rated_places[:max_results]
-                
-                # Get additional details for top places (including photos)
-                enriched_places = []
-                for place in top_places:
-                    place_id = place.get('place_id')
-                    if place_id:
-                        # Get place details with photos
-                        details_response = requests.get(
-                            f"{GOOGLE_PLACES_BASE_URL}/details/json",
-                            params={
-                                'place_id': place_id,
-                                'fields': 'formatted_address,formatted_phone_number,opening_hours,website,price_level,photos',
-                                'key': GOOGLE_PLACES_API_KEY
-                            }
-                        )
-                        
-                        if details_response.status_code == 200:
-                            details_data = details_response.json()
-                            if details_data['status'] == 'OK':
-                                place_details = details_data['result']
-                                # Merge basic info with details
-                                enriched_place = {
-                                    'place_id': place_id,
-                                    'name': place.get('name'),
-                                    'formatted_address': place_details.get('formatted_address'),
-                                    'formatted_phone_number': place_details.get('formatted_phone_number'),
-                                    'website': place_details.get('website'),
-                                    'rating': place.get('rating'),
-                                    'user_ratings_total': place.get('user_ratings_total'),
-                                    'price_level': place_details.get('price_level'),
-                                    'opening_hours': place_details.get('opening_hours'),
-                                    'photos': place_details.get('photos', []),
-                                    'geometry': place.get('geometry'),
-                                    'vicinity': place.get('vicinity'),
-                                    'types': place.get('types', [])
-                                }
-                                enriched_places.append(enriched_place)
-                            else:
-                                # Use basic info if details fail
-                                enriched_places.append(place)
-                        else:
-                            # Use basic info if details request fails
-                            enriched_places.append(place)
-                
-                return enriched_places, None
-            else:
-                return None, f"Nearby search error: {nearby_data['status']}"
-        else:
-            return None, f"Google Places API error: {nearby_response.status_code}"
-    except Exception as e:
-        return None, str(e)
-
-def get_place_photo(photo_reference, max_width=400):
-    """Get place photo using Google Places Photo API"""
-    if not GOOGLE_PLACES_API_KEY:
-        return None, "Google Places API key not configured"
-    
-    try:
-        photo_url = f"{GOOGLE_PLACES_BASE_URL}/photo"
-        params = {
-            'maxwidth': max_width,
-            'photo_reference': photo_reference,
-            'key': GOOGLE_PLACES_API_KEY
-        }
-        
-        # Return the photo URL
-        return f"{photo_url}?maxwidth={max_width}&photo_reference={photo_reference}&key={GOOGLE_PLACES_API_KEY}", None
-    except Exception as e:
-        return None, str(e)
-
-# CRUD Operations
+@app.route("/health")
+def health():
+    return {"status": "ok"}, 200
 
 @app.route('/api/weather', methods=['POST'])
 def create_weather_record():
-    """CREATE - Create a new weather record"""
     try:
         data = request.get_json()
         
@@ -667,189 +118,181 @@ def create_weather_record():
         if not all([location, start_date, end_date]):
             return jsonify({'error': 'Missing required fields: location, start_date, end_date'}), 400
         
-        # Validate date range
-        is_valid_date, date_result = validate_date_range(start_date, end_date)
-        if not is_valid_date:
-            return jsonify({'error': date_result}), 400
+        is_valid, location_data, error = weather_service.validate_location(location)
+        if not is_valid:
+            return jsonify({'error': error}), 400
         
-        start_date_obj, end_date_obj = date_result
+        is_valid, error = weather_service.validate_date_range(start_date, end_date)
+        if not is_valid:
+            return jsonify({'error': error}), 400
         
-        # Validate location
-        is_valid_location, location_result = validate_location(location)
-        if not is_valid_location:
-            return jsonify({'error': location_result}), 400
-        
-        lat, lon = location_result['latitude'], location_result['longitude']
-        
-        # Get weather data
-        weather_data, weather_error = get_weather_data(lat, lon, start_date_obj, end_date_obj)
-        if weather_error:
-            return jsonify({'error': weather_error}), 500
-        
-        # Create database record
-        new_record = WeatherRecord(
-            location=location,
-            latitude=lat,
-            longitude=lon,
-            start_date=start_date_obj,
-            end_date=end_date_obj,
-            temperature_data=weather_data
+        is_valid, weather_data, error = weather_service.fetch_weather_data(
+            location_data['latitude'],
+            location_data['longitude'],
+            start_date,
+            end_date
         )
+        if not is_valid:
+            return jsonify({'error': error}), 500
         
-        db.session.add(new_record)
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Weather record created successfully',
-            'id': new_record.id,
-            'data': weather_data
-        }), 201
-        
+        try:
+            weather_record = WeatherRecord(
+                location=location,
+                start_date=start_date,
+                end_date=end_date,
+                latitude=location_data['latitude'],
+                longitude=location_data['longitude'],
+                temperature_data=weather_data
+            )
+            
+            db.session.add(weather_record)
+            db.session.commit()
+            db.session.refresh(weather_record)
+            
+            return jsonify({
+                'message': 'Weather record created successfully',
+                'data': {
+                    'id': weather_record.id,
+                    'location': weather_record.location,
+                    'start_date': weather_record.start_date,
+                    'end_date': weather_record.end_date,
+                    'latitude': weather_record.latitude,
+                    'longitude': weather_record.longitude,
+                    'created_at': weather_record.created_at.isoformat()
+                }
+            }), 201
+            
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': f'Database error: {str(e)}'}), 500
+            
     except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 @app.route('/api/weather', methods=['GET'])
-def read_weather_records():
-    """READ - Get all weather records with optional filtering"""
+def get_all_weather_records():
     try:
-        # Query parameters for filtering
-        location = request.args.get('location')
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        limit = request.args.get('limit', 50, type=int)
-        offset = request.args.get('offset', 0, type=int)
+        records = WeatherRecord.query.all()
         
-        query = WeatherRecord.query
-        
-        if location:
-            query = query.filter(WeatherRecord.location.ilike(f'%{location}%'))
-        
-        if start_date:
-            query = query.filter(WeatherRecord.start_date >= start_date)
-        
-        if end_date:
-            query = query.filter(WeatherRecord.end_date <= end_date)
-        
-        records = query.order_by(WeatherRecord.created_at.desc()).limit(limit).offset(offset).all()
-        
-        result = []
+        records_data = []
         for record in records:
-            result.append({
+            records_data.append({
                 'id': record.id,
                 'location': record.location,
+                'start_date': record.start_date,
+                'end_date': record.end_date,
                 'latitude': record.latitude,
                 'longitude': record.longitude,
-                'start_date': record.start_date.isoformat(),
-                'end_date': record.end_date.isoformat(),
-                'temperature_data': record.temperature_data,
-                'created_at': record.created_at.isoformat(),
-                'updated_at': record.updated_at.isoformat()
+                'created_at': record.created_at.isoformat() if record.created_at else None,
+                'updated_at': record.updated_at.isoformat() if record.updated_at else None,
+                'temperature_data': record.temperature_data
             })
         
         return jsonify({
-            'records': result,
-            'total': len(result)
+            'records': records_data,
+            'total': len(records_data)
         }), 200
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 @app.route('/api/weather/<int:record_id>', methods=['GET'])
-def read_weather_record(record_id):
-    """READ - Get a specific weather record"""
+def get_weather_record(record_id):
     try:
         record = WeatherRecord.query.get(record_id)
         
         if not record:
-            return jsonify({'error': 'Record not found'}), 404
+            return jsonify({'error': 'Weather record not found'}), 404
         
         return jsonify({
             'id': record.id,
             'location': record.location,
+            'start_date': record.start_date,
+            'end_date': record.end_date,
             'latitude': record.latitude,
             'longitude': record.longitude,
-            'start_date': record.start_date.isoformat(),
-            'end_date': record.end_date.isoformat(),
-            'temperature_data': record.temperature_data,
-            'created_at': record.created_at.isoformat(),
-            'updated_at': record.updated_at.isoformat()
+            'created_at': record.created_at.isoformat() if record.created_at else None,
+            'updated_at': record.updated_at.isoformat() if record.updated_at else None,
+            'temperature_data': record.temperature_data
         }), 200
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 @app.route('/api/weather/<int:record_id>', methods=['PUT'])
 def update_weather_record(record_id):
-    """UPDATE - Update a weather record"""
     try:
-        record = WeatherRecord.query.get(record_id)
-        
-        if not record:
-            return jsonify({'error': 'Record not found'}), 404
-        
         data = request.get_json()
         
         if not data:
             return jsonify({'error': 'No data provided'}), 400
         
-        # Update fields if provided
-        if 'location' in data:
-            location = data['location']
-            is_valid_location, location_result = validate_location(location)
-            if not is_valid_location:
-                return jsonify({'error': location_result}), 400
+        location = data.get('location')
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        
+        if not all([location, start_date, end_date]):
+            return jsonify({'error': 'Missing required fields: location, start_date, end_date'}), 400
+        
+        record = WeatherRecord.query.get(record_id)
+        if not record:
+            return jsonify({'error': 'Weather record not found'}), 404
+        
+        try:
+            is_valid, location_data, error = weather_service.validate_location(location)
+            if not is_valid:
+                return jsonify({'error': error}), 400
+            
+            is_valid, error = weather_service.validate_date_range(start_date, end_date)
+            if not is_valid:
+                return jsonify({'error': error}), 400
+            
+            is_valid, weather_data, error = weather_service.fetch_weather_data(
+                location_data['latitude'],
+                location_data['longitude'],
+                start_date,
+                end_date
+            )
+            if not is_valid:
+                return jsonify({'error': error}), 500
             
             record.location = location
-            record.latitude = location_result['latitude']
-            record.longitude = location_result['longitude']
-        
-        if 'start_date' in data or 'end_date' in data:
-            start_date = data.get('start_date', record.start_date.isoformat())
-            end_date = data.get('end_date', record.end_date.isoformat())
-            
-            is_valid_date, date_result = validate_date_range(start_date, end_date)
-            if not is_valid_date:
-                return jsonify({'error': date_result}), 400
-            
-            start_date_obj, end_date_obj = date_result
-            record.start_date = start_date_obj
-            record.end_date = end_date_obj
-        
-        # Refresh weather data if location or dates changed
-        if any(key in data for key in ['location', 'start_date', 'end_date']):
-            weather_data, weather_error = get_weather_data(
-                record.latitude, 
-                record.longitude, 
-                record.start_date, 
-                record.end_date
-            )
-            
-            if weather_error:
-                return jsonify({'error': weather_error}), 500
-            
+            record.start_date = start_date
+            record.end_date = end_date
+            record.latitude = location_data['latitude']
+            record.longitude = location_data['longitude']
             record.temperature_data = weather_data
-        
-        record.updated_at = datetime.utcnow()
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Weather record updated successfully',
-            'id': record.id
-        }), 200
-        
+            record.updated_at = datetime.utcnow()
+            
+            db.session.commit()
+            
+            return jsonify({
+                'message': 'Weather record updated successfully',
+                'data': {
+                    'id': record.id,
+                    'location': record.location,
+                    'start_date': record.start_date,
+                    'end_date': record.end_date,
+                    'latitude': record.latitude,
+                    'longitude': record.longitude,
+                    'updated_at': record.updated_at.isoformat()
+                }
+            }), 200
+            
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': f'Update error: {str(e)}'}), 500
+            
     except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 @app.route('/api/weather/<int:record_id>', methods=['DELETE'])
 def delete_weather_record(record_id):
-    """DELETE - Delete a weather record"""
     try:
         record = WeatherRecord.query.get(record_id)
         
         if not record:
-            return jsonify({'error': 'Record not found'}), 404
+            return jsonify({'error': 'Weather record not found'}), 404
         
         db.session.delete(record)
         db.session.commit()
@@ -858,519 +301,282 @@ def delete_weather_record(record_id):
         
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
-# API Integration Endpoints
-
-@app.route('/api/youtube/<int:record_id>', methods=['GET'])
-def get_location_youtube_videos(record_id):
-    """Get YouTube videos for a specific weather record location"""
+@app.route('/api/weather/clear-all', methods=['DELETE'])
+def clear_all_weather_records():
     try:
-        record = WeatherRecord.query.get(record_id)
+        record_count = WeatherRecord.query.count()
         
-        if not record:
-            return jsonify({'error': 'Record not found'}), 404
+        if record_count == 0:
+            return jsonify({'message': 'No weather records to delete'}), 200
         
-        videos, error = get_youtube_videos(record.location)
-        
-        if error:
-            return jsonify({'error': error}), 500
-        
-        return jsonify({
-            'location': record.location,
-            'videos': videos
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/youtube/direct/<location>', methods=['GET'])
-def get_youtube_videos_direct(location):
-    """Get YouTube videos directly for a location without creating weather records"""
-    try:
-        # Decode the location from URL
-        decoded_location = requests.utils.unquote(location)
-        
-        videos, error = get_youtube_videos(decoded_location)
-        
-        if error:
-            return jsonify({'error': error}), 500
-        
-        return jsonify({
-            'location': decoded_location,
-            'videos': videos
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/maps/<int:record_id>', methods=['GET'])
-def get_location_maps_data(record_id):
-    """Get Google Maps data for a specific weather record location"""
-    try:
-        record = WeatherRecord.query.get(record_id)
-        
-        if not record:
-            return jsonify({'error': 'Record not found'}), 404
-        
-        maps_data, error = get_google_maps_data(record.location)
-        
-        if error:
-            return jsonify({'error': error}), 500
-        
-        return jsonify({
-            'location': record.location,
-            'maps_data': maps_data
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/nearby/<place_type>')
-def get_nearby_places_endpoint(place_type):
-    """Get nearby places by type (restaurant, hospital, lodging)"""
-    try:
-        lat = request.args.get('lat', type=float)
-        lon = request.args.get('lon', type=float)
-        
-        if not lat or not lon:
-            return jsonify({'error': 'Latitude and longitude are required'}), 400
-        
-        if place_type not in ['restaurant', 'hospital', 'lodging']:
-            return jsonify({'error': 'Invalid place type. Use: restaurant, hospital, or lodging'}), 400
-        
-        places, error = get_nearby_places(lat, lon, place_type)
-        if error:
-            return jsonify({'error': error}), 500
-        
-        return jsonify({'places': places or []}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/places/photo')
-def get_place_photo_endpoint():
-    """Get place photo URL - supports both legacy and new API v1"""
-    try:
-        photo_reference = request.args.get('photo_reference')
-        photo_name = request.args.get('photo_name')  # For new API v1
-        max_width = request.args.get('max_width', 400, type=int)
-        
-        if not photo_reference and not photo_name:
-            return jsonify({'error': 'Photo reference or photo name is required'}), 400
-        
-        if photo_name:
-            # Use new API v1
-            photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?maxWidthPx={max_width}&key={GOOGLE_PLACES_API_KEY}"
-        else:
-            # Use legacy API
-            photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth={max_width}&photo_reference={photo_reference}&key={GOOGLE_PLACES_API_KEY}"
-        
-        # Proxy the image through our backend to avoid CORS issues
-        try:
-            response = requests.get(photo_url, stream=True)
-            if response.status_code == 200:
-                return send_file(
-                    io.BytesIO(response.content),
-                    mimetype=response.headers.get('content-type', 'image/jpeg'),
-                    as_attachment=False
-                )
-            else:
-                return jsonify({'error': f'Photo API error: {response.status_code}'}), 500
-        except Exception as e:
-            return jsonify({'error': f'Failed to fetch photo: {str(e)}'}), 500
-            
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/places/details/<place_id>')
-def get_place_details_endpoint(place_id):
-    """Get detailed information about a specific place"""
-    try:
-        if not GOOGLE_PLACES_API_KEY:
-            return jsonify({'error': 'Google Places API key not configured'}), 500
-        
-        details_response = requests.get(
-            f"{GOOGLE_PLACES_BASE_URL}/details/json",
-            params={
-                'place_id': place_id,
-                'fields': 'name,formatted_address,formatted_phone_number,opening_hours,website,price_level,rating,user_ratings_total,photos,geometry',
-                'key': GOOGLE_PLACES_API_KEY
-            }
-        )
-        
-        if details_response.status_code == 200:
-            details_data = details_response.json()
-            if details_data['status'] == 'OK':
-                return jsonify(details_data['result']), 200
-            else:
-                return jsonify({'error': f"Place details error: {details_data['status']}"}), 500
-        else:
-            return jsonify({'error': f"Google Places API error: {details_response.status_code}"}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/hourly', methods=['POST'])
-def create_hourly_forecast():
-    """Create hourly forecast for a location"""
-    try:
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
-        
-        location = data.get('location')
-        date = data.get('date', datetime.now().strftime('%Y-%m-%d'))
-        
-        if not location:
-            return jsonify({'error': 'Location is required'}), 400
-        
-        # Validate location
-        is_valid_location, location_result = validate_location(location)
-        if not is_valid_location:
-            return jsonify({'error': location_result}), 400
-        
-        lat, lon = location_result['latitude'], location_result['longitude']
-        
-        # Get hourly weather data
-        hourly_data, hourly_error = get_hourly_weather_data(lat, lon)
-        if hourly_error:
-            return jsonify({'error': hourly_error}), 500
-        
-        # Create database record
-        new_record = WeatherRecord(
-            location=location,
-            latitude=lat,
-            longitude=lon,
-            start_date=datetime.strptime(date, '%Y-%m-%d').date(),
-            end_date=datetime.strptime(date, '%Y-%m-%d').date(),
-            temperature_data={'hourly_forecast': hourly_data}
-        )
-        
-        db.session.add(new_record)
+        WeatherRecord.query.delete()
         db.session.commit()
         
         return jsonify({
-            'message': 'Hourly forecast created successfully',
-            'id': new_record.id,
-            'location': location,
-            'date': date,
-            'hourly_forecast': hourly_data
-        }), 201
+            'message': f'Successfully deleted {record_count} weather records',
+            'deleted_count': record_count
+        }), 200
         
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
-@app.route('/api/hourly/<int:record_id>', methods=['GET'])
-def get_hourly_forecast(record_id):
-    """Get hourly forecast for a specific record"""
-    try:
-        record = WeatherRecord.query.get(record_id)
-        
-        if not record:
-            return jsonify({'error': 'Record not found'}), 404
-        
-        date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
-        
-        # Get fresh hourly data
-        hourly_data, hourly_error = get_hourly_weather_data(record.latitude, record.longitude)
-        if hourly_error:
-            return jsonify({'error': hourly_error}), 500
-        
-        return jsonify({
-            'location': record.location,
-            'date': date,
-            'hourly_forecast': hourly_data
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/hourly/direct', methods=['GET'])
-def get_hourly_forecast_direct():
-    """Get hourly forecast directly for coordinates"""
-    try:
-        lat = request.args.get('lat', type=float)
-        lon = request.args.get('lon', type=float)
-        
-        if not lat or not lon:
-            return jsonify({'error': 'Latitude and longitude are required'}), 400
-        
-        # Get hourly weather data
-        hourly_data, hourly_error = get_hourly_weather_data(lat, lon)
-        if hourly_error:
-            return jsonify({'error': hourly_error}), 500
-        
-        return jsonify({
-            'latitude': lat,
-            'longitude': lon,
-            'hourly_forecast': hourly_data
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/today/<location>', methods=['GET'])
+@app.route('/api/today/<location>')
 def get_todays_weather(location):
-    """Get today's weather with 3-hour intervals for a specific location"""
     try:
-        # Validate location
-        is_valid_location, location_result = validate_location(location)
-        if not is_valid_location:
-            return jsonify({'error': location_result}), 400
+        is_valid, data, error = weather_service.get_todays_weather_3hour(location)
         
-        lat, lon = location_result['latitude'], location_result['longitude']
-        
-        # Get today's weather data
-        weather_data, weather_error = get_todays_weather_3hour(lat, lon)
-        if weather_error:
-            return jsonify({'error': weather_error}), 500
-        
-        return jsonify({
-            'location': location,
-            'weather_data': weather_data
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/today/coordinates', methods=['GET'])
-def get_todays_weather_by_coordinates():
-    """Get today's weather with 3-hour intervals using coordinates"""
-    try:
-        lat = request.args.get('lat', type=float)
-        lon = request.args.get('lon', type=float)
-        
-        if not lat or not lon:
-            return jsonify({'error': 'Latitude and longitude are required'}), 400
-        
-        # Get today's weather data
-        weather_data, weather_error = get_todays_weather_3hour(lat, lon)
-        if weather_error:
-            return jsonify({'error': weather_error}), 500
-        
-        return jsonify({
-            'coordinates': {'lat': lat, 'lon': lon},
-            'weather_data': weather_data
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/today/record/<int:record_id>', methods=['GET'])
-def get_todays_weather_from_record(record_id):
-    """Get today's weather with 3-hour intervals for a specific weather record location"""
-    try:
-        record = WeatherRecord.query.get(record_id)
-        
-        if not record:
-            return jsonify({'error': 'Record not found'}), 404
-        
-        # Get today's weather data
-        weather_data, weather_error = get_todays_weather_3hour(record.latitude, record.longitude)
-        if weather_error:
-            return jsonify({'error': weather_error}), 500
-        
-        return jsonify({
-            'record_id': record_id,
-            'location': record.location,
-            'weather_data': weather_data
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-# Data Export Endpoints
-
-@app.route('/api/export/json', methods=['GET'])
-def export_json():
-    """Export weather records as JSON"""
-    try:
-        records = WeatherRecord.query.order_by(WeatherRecord.created_at.desc()).all()
-        
-        data = []
-        for record in records:
-            data.append({
-                'id': record.id,
-                'location': record.location,
-                'latitude': record.latitude,
-                'longitude': record.longitude,
-                'start_date': record.start_date.isoformat(),
-                'end_date': record.end_date.isoformat(),
-                'temperature_data': record.temperature_data,
-                'created_at': record.created_at.isoformat(),
-                'updated_at': record.updated_at.isoformat()
-            })
+        if not is_valid:
+            return jsonify({'error': error}), 400
         
         return jsonify(data), 200
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
-@app.route('/api/export/csv', methods=['GET'])
-def export_csv():
-    """Export weather records as CSV"""
+@app.route('/api/today/coordinates')
+def get_todays_weather_by_coordinates():
     try:
-        records = WeatherRecord.query.order_by(WeatherRecord.created_at.desc()).all()
+        lat = request.args.get('lat')
+        lon = request.args.get('lon')
         
-        output = io.StringIO()
-        writer = csv.writer(output)
+        if not lat or not lon:
+            return jsonify({'error': 'Missing latitude or longitude parameters'}), 400
         
-        # Write header
-        writer.writerow(['ID', 'Location', 'Latitude', 'Longitude', 'Start Date', 'End Date', 'Created At', 'Updated At'])
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except ValueError:
+            return jsonify({'error': 'Invalid latitude or longitude values'}), 400
         
-        # Write data
-        for record in records:
-            writer.writerow([
-                record.id,
-                record.location,
-                record.latitude,
-                record.longitude,
-                record.start_date.isoformat(),
-                record.end_date.isoformat(),
-                record.created_at.isoformat(),
-                record.updated_at.isoformat()
-            ])
+        is_valid, location_data, error = external_api_service.get_reverse_geocoding(lat, lon)
         
-        output.seek(0)
+        if is_valid:
+            location_name = location_data.get('formatted_address', f"{lat},{lon}")
+        else:
+            location_name = f"{lat},{lon}"
         
-        return send_file(
-            io.BytesIO(output.getvalue().encode('utf-8')),
-            mimetype='text/csv',
-            as_attachment=True,
-            download_name='weather_records.csv'
-        )
+        is_valid, data, error = weather_service.get_todays_weather_3hour(location_name)
+        
+        if not is_valid:
+            return jsonify({'error': error}), 400
+        
+        return jsonify(data), 200
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
-@app.route('/api/export/xml', methods=['GET'])
-def export_xml():
-    """Export weather records as XML"""
+@app.route('/api/hourly/<int:record_id>')
+def get_hourly_forecast_by_record(record_id):
     try:
-        records = WeatherRecord.query.order_by(WeatherRecord.created_at.desc()).all()
+        record = WeatherRecord.query.get(record_id)
+        if not record:
+            return jsonify({'error': 'Weather record not found'}), 404
         
-        root = ET.Element('weather_records')
+        date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
         
-        for record in records:
-            record_elem = ET.SubElement(root, 'record')
+        is_valid, data, error = weather_service.get_hourly_forecast(record.location, date)
+        
+        if not is_valid:
+            return jsonify({'error': error}), 400
+        
+        return jsonify(data), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
+
+@app.route('/api/hourly/direct')
+def get_hourly_forecast_direct():
+    try:
+        lat = request.args.get('lat')
+        lon = request.args.get('lon')
+        
+        if not lat or not lon:
+            return jsonify({'error': 'Missing latitude or longitude parameters'}), 400
+        
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except ValueError:
+            return jsonify({'error': 'Invalid latitude or longitude values'}), 400
+        
+        is_valid, data, error = weather_service.get_hourly_forecast_by_coordinates(lat, lon)
+        
+        if not is_valid:
+            return jsonify({'error': error}), 400
+        
+        return jsonify(data), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
+
+@app.route('/api/export/<format_type>')
+def export_data(format_type):
+    try:
+        records = WeatherRecord.query.all()
+        
+        if format_type == 'json':
+            data = export_service.export_to_json(records)
+        elif format_type == 'csv':
+            data = export_service.export_to_csv(records)
+        elif format_type == 'xml':
+            data = export_service.export_to_xml(records)
+        elif format_type == 'pdf':
+            data = export_service.export_to_pdf(records)
+        elif format_type == 'markdown':
+            data = export_service.export_to_markdown(records)
+        else:
+            return jsonify({'error': f'Unsupported export format: {format_type}'}), 400
+        
+        if format_type == 'pdf':
+            buffer = BytesIO(data)
+            buffer.seek(0)
+            return send_file(
+                buffer,
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name=f'weather_records_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+            )
+        else:
+            buffer = BytesIO(data.encode('utf-8'))
+            buffer.seek(0)
+            return send_file(
+                buffer,
+                mimetype=_get_mime_type(format_type),
+                as_attachment=True,
+                download_name=f'weather_records_{datetime.now().strftime("%Y%m%d_%H%M%S")}.{format_type}'
+            )
             
-            ET.SubElement(record_elem, 'id').text = str(record.id)
-            ET.SubElement(record_elem, 'location').text = record.location
-            ET.SubElement(record_elem, 'latitude').text = str(record.latitude)
-            ET.SubElement(record_elem, 'longitude').text = str(record.longitude)
-            ET.SubElement(record_elem, 'start_date').text = record.start_date.isoformat()
-            ET.SubElement(record_elem, 'end_date').text = record.end_date.isoformat()
-            ET.SubElement(record_elem, 'created_at').text = record.created_at.isoformat()
-            ET.SubElement(record_elem, 'updated_at').text = record.updated_at.isoformat()
-        
-        xml_str = ET.tostring(root)
-        
-        return send_file(
-            io.BytesIO(xml_str),
-            mimetype='application/xml',
-            as_attachment=True,
-            download_name='weather_records.xml'
-        )
-        
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Export error: {str(e)}'}), 500
 
-@app.route('/api/export/pdf', methods=['GET'])
-def export_pdf():
-    """Export weather records as PDF"""
-    try:
-        records = WeatherRecord.query.order_by(WeatherRecord.created_at.desc()).all()
-        
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter)
-        elements = []
-        
-        # Title
-        styles = getSampleStyleSheet()
-        title = Paragraph("Weather Records Report", styles['Title'])
-        elements.append(title)
-        elements.append(Paragraph("<br/>", styles['Normal']))
-        
-        # Table data
-        data = [['ID', 'Location', 'Start Date', 'End Date', 'Created At']]
-        
-        for record in records:
-            data.append([
-                str(record.id),
-                record.location,
-                record.start_date.strftime('%Y-%m-%d'),
-                record.end_date.strftime('%Y-%m-%d'),
-                record.created_at.strftime('%Y-%m-%d %H:%M')
-            ])
-        
-        table = Table(data)
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), '#CCCCCC'),
-            ('TEXTCOLOR', (0, 0), (-1, 0), '#000000'),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), '#FFFFFF'),
-            ('TEXTCOLOR', (0, 1), (-1, -1), '#000000'),
-            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 1), (-1, -1), 10),
-            ('GRID', (0, 0), (-1, -1), 1, '#000000')
-        ]))
-        
-        elements.append(table)
-        doc.build(elements)
-        
-        buffer.seek(0)
-        
-        return send_file(
-            buffer,
-            mimetype='application/pdf',
-            as_attachment=True,
-            download_name='weather_records.pdf'
-        )
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+def _get_mime_type(format_type):
+    mime_types = {
+        'json': 'application/json',
+        'csv': 'text/csv',
+        'xml': 'application/xml',
+        'markdown': 'text/markdown'
+    }
+    return mime_types.get(format_type, 'text/plain')
 
-@app.route('/api/export/markdown', methods=['GET'])
-def export_markdown():
-    """Export weather records as Markdown"""
+@app.route('/api/youtube/<location>')
+def get_youtube_videos(location):
     try:
-        records = WeatherRecord.query.order_by(WeatherRecord.created_at.desc()).all()
+        max_results = request.args.get('max_results', 5, type=int)
         
-        markdown_content = "# Weather Records Report\n\n"
-        markdown_content += f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-        markdown_content += "| ID | Location | Start Date | End Date | Created At |\n"
-        markdown_content += "|----|----------|------------|----------|------------|\n"
+        is_valid, videos, error = external_api_service.get_youtube_videos(location, max_results)
         
-        for record in records:
-            markdown_content += f"| {record.id} | {record.location} | {record.start_date.strftime('%Y-%m-%d')} | {record.end_date.strftime('%Y-%m-%d')} | {record.created_at.strftime('%Y-%m-%d %H:%M')} |\n"
+        if not is_valid:
+            return jsonify({'error': error}), 400
         
-        return send_file(
-            io.BytesIO(markdown_content.encode('utf-8')),
-            mimetype='text/markdown',
-            as_attachment=True,
-            download_name='weather_records.md'
-        )
+        return jsonify({
+            'location': location,
+            'videos': videos,
+            'total': len(videos)
+        }), 200
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
-# Health check endpoint
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
+@app.route('/api/places/nearby')
+def get_nearby_places():
     try:
-        # Test database connection
-        db.session.execute(db.text('SELECT 1'))
-        return jsonify({'status': 'healthy', 'database': 'connected'}), 200
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        radius = request.args.get('radius', 5000, type=int)
+        place_type = request.args.get('type', 'restaurant')
+        
+        if not lat or not lon:
+            return jsonify({'error': 'Missing latitude or longitude parameters'}), 400
+        
+        is_valid, places, error = external_api_service.get_nearby_places(lat, lon, radius, place_type)
+        
+        if not is_valid:
+            return jsonify({'error': error}), 400
+        
+        return jsonify({
+            'latitude': lat,
+            'longitude': lon,
+            'radius': radius,
+            'place_type': place_type,
+            'places': places,
+            'total': len(places)
+        }), 200
+        
     except Exception as e:
-        return jsonify({'status': 'unhealthy', 'error': str(e)}), 500
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
+
+@app.route('/api/places/multiple')
+def get_multiple_place_types():
+    try:
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        place_types = request.args.get('types', 'restaurant,hospital,lodging').split(',')
+        
+        if not lat or not lon:
+            return jsonify({'error': 'Missing latitude or longitude parameters'}), 400
+        
+        results = external_api_service.get_multiple_place_types(lat, lon, place_types)
+        
+        return jsonify({
+            'latitude': lat,
+            'longitude': lon,
+            'place_types': place_types,
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
+
+@app.route('/api/places/photo')
+def get_place_photo():
+    try:
+        photo_reference = request.args.get('photo_reference')
+        max_width = request.args.get('max_width', 400, type=int)
+        
+        if not photo_reference:
+            return jsonify({'error': 'Missing photo_reference parameter'}), 400
+        
+        if photo_reference.startswith('mock_photo_'):
+            photo_number = photo_reference.split('_')[-1]
+            placeholder_url = f'https://via.placeholder.com/{max_width}x300/4A90E2/ffffff?text=Place+Photo+{photo_number}'
+            return jsonify({'photo_url': placeholder_url}), 200
+        
+        if external_api_service.google_places_api_key:
+            photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth={max_width}&photo_reference={photo_reference}&key={external_api_service.google_places_api_key}"
+            return jsonify({'photo_url': photo_url}), 200
+        else:
+            placeholder_url = f'https://via.placeholder.com/{max_width}x300/4A90E2/ffffff?text=Photo+Not+Available'
+            return jsonify({'photo_url': placeholder_url}), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
+
+@app.route('/api/maps/embed')
+def get_maps_embed_url():
+    try:
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        zoom = request.args.get('zoom', 12, type=int)
+        
+        if not lat or not lon:
+            return jsonify({'error': 'Missing latitude or longitude parameters'}), 400
+        
+        embed_url = external_api_service.get_google_maps_embed_url(lat, lon, zoom)
+        
+        return jsonify({
+            'latitude': lat,
+            'longitude': lon,
+            'zoom': zoom,
+            'embed_url': embed_url
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
+
+
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
     app.run(debug=True, host='0.0.0.0', port=5000)
