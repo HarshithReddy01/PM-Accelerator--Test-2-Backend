@@ -52,9 +52,6 @@ def after_request(response):
     response.headers.add('X-XSS-Protection', '1; mode=block')
     return response
 
-
-
-# Database configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
 app.config.setdefault("SQLALCHEMY_TRACK_MODIFICATIONS", False)
 app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {
@@ -74,7 +71,6 @@ with app.app_context():
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
     try:
         db_connected = True
         try:

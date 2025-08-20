@@ -43,7 +43,6 @@ class ExportService:
             output = StringIO()
             writer = csv.writer(output)
             
-            # Write header
             writer.writerow([
                 'ID', 'Location', 'Start Date', 'End Date', 
                 'Latitude', 'Longitude', 'Created At', 'Updated At',
@@ -95,7 +94,6 @@ class ExportService:
             for record in records:
                 record_elem = ET.SubElement(root, "record")
                 
-                # record info
                 ET.SubElement(record_elem, "id").text = str(record.id)
                 ET.SubElement(record_elem, "location").text = str(record.location or 'N/A')
                 ET.SubElement(record_elem, "start_date").text = str(record.start_date or 'N/A')
@@ -115,7 +113,6 @@ class ExportService:
                 else:
                     updated_elem.text = 'N/A'
                 
-                # summariy
                 if record.temperature_data:
                     weather_elem = ET.SubElement(record_elem, "weather_summary")
                     
@@ -139,9 +136,6 @@ class ExportService:
             raise Exception(f"XML export error: {str(e)}")
     
     def export_to_pdf(self, records: List[WeatherRecord]) -> bytes:
-        """
-        Export weather records to PDF format with detailed weather information
-        """
         try:
             buffer = BytesIO()
             doc = SimpleDocTemplate(buffer, pagesize=letter)
@@ -157,7 +151,7 @@ class ExportService:
             title = Paragraph("🌤️ Weather Records Report", title_style)
             elements.append(title)
             
-            # Summary
+            # Summariy
             summary_style = ParagraphStyle(
                 'Summary',
                 parent=self.styles['Normal'],
@@ -186,7 +180,6 @@ class ExportService:
                     created
                 ])
             
-            # C
             table = Table(table_data, colWidths=[0.5*inch, 2*inch, 1.5*inch, 1.5*inch, 1*inch])
             table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
@@ -208,7 +201,6 @@ class ExportService:
                 elements.append(Paragraph(f"📋 Record {i}: {record.location}", self.styles['Heading2']))
                 elements.append(Spacer(1, 10))
                 
-                # Basic record info
                 basic_info = f"📍 Location: {record.location}<br/>"
                 basic_info += f"Date Range: {record.start_date} to {record.end_date}<br/>"
                 basic_info += f"Coordinates: {record.latitude:.4f}, {record.longitude:.4f}<br/>"
@@ -216,7 +208,6 @@ class ExportService:
                 elements.append(Paragraph(basic_info, self.styles['Normal']))
                 elements.append(Spacer(1, 15))
                 
-                #  details
                 if record.temperature_data:
                     weather_info = "🌤️ Weather Data:<br/>"
                     
@@ -292,7 +283,6 @@ class ExportService:
             markdown.append(f"**Total Records:** {len(records)}")
             markdown.append("")
             
-            # Summary table
             markdown.append("## Records Summary")
             markdown.append("")
             markdown.append("| ID | Location | Date Range | Coordinates | Created |")
@@ -307,7 +297,6 @@ class ExportService:
             
             markdown.append("")
             
-            # Detailed information
             markdown.append("## Detailed Information")
             markdown.append("")
             
@@ -347,9 +336,6 @@ class ExportService:
             raise Exception(f"Markdown export error: {str(e)}")
     
     def export_records(self, db: Session, format_type: str) -> Tuple[bool, Any, Optional[str]]:
-        """
-        Export all weather records in the specified format
-        """
         try:
             records = db.query(WeatherRecord).all()
             

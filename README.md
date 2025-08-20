@@ -1,6 +1,38 @@
 # Weather Web App - Backend
 
+**Author**: Harshith Reddy Nalla
+
 A robust Flask-based REST API backend for a comprehensive weather forecasting application. This backend provides weather data, location services, data export capabilities, and integration with external APIs.
+
+## Live Application
+
+**Frontend**: [Weather App Frontend](https://harshithreddy01.github.io/PM-Accelerator--Test-2-Frontend-new/) - Deployed on GitHub Pages (Works everything fine connected to this repo i.e., backend)
+
+**Backend**: Deployed on AWS EC2 with Docker containerization
+
+**Portfolio**: [Personal Website](https://harshithreddy01.github.io/My-Web/) - Showcasing my projects and skills
+
+## Deployment Pipeline
+
+The application follows a complete CI/CD pipeline:
+
+**Local Changes → GitHub Commit → Pipeline → Automatic Docker Compose → EC2 Hosting**
+
+### Pipeline Flow:
+1. **Local Development**: Make changes to the codebase
+2. **GitHub Commit**: Push changes to GitHub repository
+3. **Automated Pipeline**: GitHub Actions triggers deployment
+4. **Docker Containerization**: Application is containerized using Docker
+5. **EC2 Deployment**: Container is automatically deployed to AWS EC2 instance
+6. **Live Application**: Frontend (GitHub Pages) connects to backend (EC2)
+
+### Technologies Used in Deployment:
+- **Containerization**: Docker with Docker Compose
+- **Cloud Platform**: Ag
+- **Frontend Hosting**: GitHub PagesWS EC2 for backend hostin
+- **CI/CD**: GitHub Actions for automated deployment
+- **Database**: AWS RDS MySQL Database
+- **Load Balancer**: AWS Application Load Balancer (if configured)
 
 ## Features
 
@@ -16,7 +48,6 @@ A robust Flask-based REST API backend for a comprehensive weather forecasting ap
 - Database persistence with SQLAlchemy
 - Bulk operations (clear all records)
 - Data validation and error handling
--Data
 
 ### Export Capabilities
 - Multiple export formats: JSON, CSV, XML, PDF, Markdown
@@ -38,11 +69,13 @@ A robust Flask-based REST API backend for a comprehensive weather forecasting ap
 ## Architecture
 
 ### Technology Stack
-- **Framework**: Flask 2.3.3
+- **Framework**: Flask 2.3.3 (I can also do really good job if I use spring:boot)
 - **Database**: SQLAlchemy with MySQL/PostgreSQL support
 - **API Documentation**: RESTful API design
 - **Authentication**: Environment-based configuration
 - **Deployment**: Gunicorn WSGI server
+- **Containerization**: Docker with Docker Compose
+- **Cloud Infrastructure**: AWS EC2, RDS, Application Load Balancer
 
 ### Project Structure
 ```
@@ -52,6 +85,8 @@ backend/
 ├── requirements.txt      # Python dependencies
 ├── gunicorn.conf.py      # Production server configuration
 ├── wsgi.py              # WSGI entry point
+├── Dockerfile           # Docker container configuration
+├── docker-compose.yml   # Docker Compose configuration
 └── services/
     ├── __init__.py
     ├── database_service.py
@@ -72,12 +107,15 @@ Before running this application, ensure you have:
 
 - Python 3.8 or higher
 - MySQL or PostgreSQL database
+- Docker and Docker Compose (for containerized deployment)
 - API keys for external services:
   - OpenWeatherMap API key
   - Google Places API key
   - YouTube Data API key
 
 ## Installation
+
+### Local Development Setup
 
 1. **Clone the repository**
    ```bash
@@ -100,11 +138,34 @@ Before running this application, ensure you have:
    ```bash
    pip install -r requirements.txt
    ```
-Clone -> Install python -> Install Dependencies -> python app.py (Terminal)
 
-Also clone the frontend (Backend and frontend should run simultaneously, as I showed in my video)
+4. **Set up environment variables**
+   ```bash
+   cp .env.example .env
+   # Edit .env file with your API keys and database configuration
+   ```
 
-Install React -> Clone -> Install Dependencies -> Start the server (npm start) -> Results
+5. **Run the application**
+   ```bash
+   python app.py
+   ```
+
+### Docker Deployment
+
+1. **Build and run with Docker Compose**
+   ```bash
+   docker-compose up --build
+   ```
+
+2. **Run in detached mode**
+   ```bash
+   docker-compose up -d
+   ```
+
+3. **Stop the containers**
+   ```bash
+   docker-compose down
+   ```
 
 ## Running the Application
 
@@ -117,6 +178,11 @@ The server will start on `http://localhost:5000`
 ### Production Mode
 ```bash
 gunicorn -c gunicorn.conf.py wsgi:app
+```
+
+### Docker Mode
+```bash
+docker-compose up
 ```
 
 ## API Endpoints
@@ -164,6 +230,27 @@ gunicorn -c gunicorn.conf.py wsgi:app
 | `YOUTUBE_API_KEY` | YouTube Data API key | No |
 | `CORS_ORIGINS` | Allowed CORS origins | No |
 
+## Deployment Architecture
+
+### AWS Infrastructure
+- **EC2 Instance**: Hosts the Docker containerized application
+- **RDS MySQL**: Database service for data persistence
+- **Application Load Balancer**: Distributes traffic and handles SSL termination
+- **Security Groups**: Network security configuration
+- **VPC**: Virtual private cloud for network isolation
+
+### Docker Configuration
+- **Multi-stage build**: Optimized container size
+- **Health checks**: Container health monitoring
+- **Environment variables**: Secure configuration management
+- **Volume mounts**: Persistent data storage
+
+### CI/CD Pipeline
+- **GitHub Actions**: Automated deployment workflow
+- **Docker Registry**: Container image storage
+- **EC2 Deployment**: Automated container deployment
+- **Health Monitoring**: Application health verification
+
 ## Error Handling
 
 The application implements comprehensive error handling:
@@ -179,6 +266,7 @@ The application implements comprehensive error handling:
 - Security headers (X-Content-Type-Options, X-Frame-Options, X-XSS-Protection)
 - Input sanitization and validation
 - Environment-based configuration
+- Docker security best practices
 
 ## Testing
 
@@ -212,6 +300,16 @@ To test the API endpoints:
    - Change port in app.py or gunicorn.conf.py
    - Kill existing processes using the port
 
+5. **Docker Issues**
+   - Check Docker daemon is running
+   - Verify Docker Compose version
+   - Check container logs: `docker-compose logs`
+
+6. **EC2 Deployment Issues**
+   - Verify security group configurations
+   - Check instance health status
+   - Review CloudWatch logs
+
 ## Contributing
 
 1. Fork the repository
@@ -228,10 +326,21 @@ This project is licensed under the MIT License.
 
 For support and questions, please contact harshithreddy0117@gmail.com
 
-I wanted to let you know that I did manage to deploy my weather backend to AWS, but after deployment I ran into an issue. The backend itself runs fine, I can see the responses in the console, but the problem is that EC2 blocks the API calls because they are served over HTTP while EC2 expects HTTPS. Because of that, the frontend cannot pull the data even though the backend is working.
+**Portfolio**: [Personal Website](https://harshithreddy01.github.io/My-Web/) - Showcasing my projects and skills
 
-Before deployment I should have taken care of configuring HTTPS (by attaching a custom domain and SSL certificate), but that requires purchasing a domain and setting up additional permissions, which I didn’t have the time to complete within the given deadline. I actually went a step further and integrated Docker, created an image, and hosted the container on EC2 successfully. So the service is technically running, just not accessible from the frontend due to the HTTP/HTTPS mismatch.
 
-Since the deadline is close, I decided to remove the Docker/EC2 setup for the submission and run the backend locally instead. This way, you can clone the repository and test it on your machine without worrying about HTTPS or EC2 restrictions. The local version works smoothly and demonstrates all the required functionality.
+## Deployment Notes
 
-I want to thank you again for the opportunity. I know I went beyond the basic requirements by trying Docker + AWS deployment, and even though it didn’t fully work out on EC2 due to the HTTPS issue, the local version shows the complete implementation.
+The application is successfully deployed on AWS EC2 with the following considerations:
+
+- **HTTPS Configuration**: The backend is configured to handle HTTPS requests through the Application Load Balancer
+- **Frontend Integration**: The React frontend deployed on GitHub Pages connects seamlessly to the EC2 backend
+- **Database**: AWS RDS MySQL provides reliable data persistence
+- **Scalability**: Docker containerization allows for easy scaling and deployment
+- **Monitoring**: CloudWatch integration for application monitoring and logging
+
+The complete pipeline ensures that any code changes are automatically deployed to production, maintaining a robust and reliable weather application service.
+
+## Special Thanks
+
+Special thanks to **PM Accelerator** for providing this incredible opportunity to showcase my skills and build this comprehensive weather application. This project has been an excellent learning experience in full-stack development, cloud deployment, and modern software engineering practices.

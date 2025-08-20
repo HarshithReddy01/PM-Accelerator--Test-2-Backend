@@ -54,3 +54,4 @@ logs/
 # API Keys and Secrets
 secrets.json
 config.json
+.env

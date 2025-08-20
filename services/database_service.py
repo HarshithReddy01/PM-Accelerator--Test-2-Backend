@@ -58,7 +58,6 @@ class DatabaseService:
         try:
             session = self.get_session()
             
-            # database name
             result = session.execute("SELECT DATABASE()")
             db_name = result.scalar()
         
@@ -66,7 +65,6 @@ class DatabaseService:
                                    {"db_name": db_name})
             table_count = result.scalar()
             
-            #getting weather recordse
             result = session.execute("SELECT COUNT(*) FROM weather_records")
             weather_records_count = result.scalar()
             
@@ -150,16 +148,13 @@ class DatabaseService:
             from models import WeatherRecord
             from sqlalchemy import func
             
-            # total records
             total_records = session.query(WeatherRecord).count()
             
-            # records by location
             location_stats = session.query(
                 WeatherRecord.location,
                 func.count(WeatherRecord.id).label('count')
             ).group_by(WeatherRecord.location).all()
             
-            # present
             from datetime import datetime, timedelta
             last_24_hours = datetime.utcnow() - timedelta(hours=24)
             recent_records = session.query(WeatherRecord).filter(
