@@ -14,19 +14,44 @@ class WeatherService:
         
     def validate_location(self, location: str) -> Tuple[bool, Optional[Dict], Optional[str]]:
         try:
-            location_data = self.geolocator.geocode(location, timeout=10)
-            
-            if location_data:
-                return True, {
-                    'latitude': location_data.latitude,
-                    'longitude': location_data.longitude,
-                    'display_name': location_data.address
-                }, None
-            else:
-                return False, None, f"Location '{location}' not found"
+            try:
+                location_data = self.geolocator.geocode(location, timeout=10)
                 
-        except (GeocoderTimedOut, GeocoderUnavailable) as e:
-            return False, None, f"Geocoding service error: {str(e)}"
+                if location_data:
+                    return True, {
+                        'latitude': location_data.latitude,
+                        'longitude': location_data.longitude,
+                        'display_name': location_data.address
+                    }, None
+            except Exception as nominatim_error:
+                print(f"Nominatim failed: {nominatim_error}")
+                
+                
+            try:
+                if self.openweather_api_key:
+                    geocode_url = "https://api.openweathermap.org/geo/1.0/direct"
+                    params = {
+                        'q': location,
+                        'limit': 1,
+                        'appid': self.openweather_api_key
+                    }
+                    
+                    response = requests.get(geocode_url, params=params, timeout=10)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data:
+                            location_info = data[0]
+                            return True, {
+                                'latitude': location_info['lat'],
+                                'longitude': location_info['lon'],
+                                'display_name': location_info.get('name', location)
+                            }, None
+            except Exception as openweather_error:
+                print(f"OpenWeatherMap geocoding failed: {openweather_error}")
+            
+            return False, None, f"Location '{location}' not found"
+                
         except Exception as e:
             return False, None, f"Location validation error: {str(e)}"
     

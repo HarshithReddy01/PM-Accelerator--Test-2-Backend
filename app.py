@@ -103,9 +103,14 @@ def health_check():
 def health():
     return {"status": "ok"}, 200
 
+@app.route("/api/test")
+def test_api():
+    return {"message": "API is working", "timestamp": datetime.utcnow().isoformat()}, 200
+
 @app.route('/api/weather', methods=['POST'])
 def create_weather_record():
     try:
+        print(f"Received request: {request.get_json()}")
         data = request.get_json()
         
         if not data:
@@ -115,17 +120,26 @@ def create_weather_record():
         start_date = data.get('start_date')
         end_date = data.get('end_date')
         
+        print(f"Processing: location={location}, start_date={start_date}, end_date={end_date}")
+        
         if not all([location, start_date, end_date]):
             return jsonify({'error': 'Missing required fields: location, start_date, end_date'}), 400
         
+        print("Validating location...")
         is_valid, location_data, error = weather_service.validate_location(location)
         if not is_valid:
+            print(f"Location validation failed: {error}")
             return jsonify({'error': error}), 400
         
+        print(f"Location validated: {location_data}")
+        
+        print("Validating date range...")
         is_valid, error = weather_service.validate_date_range(start_date, end_date)
         if not is_valid:
+            print(f"Date validation failed: {error}")
             return jsonify({'error': error}), 400
         
+        print("Fetching weather data...")
         is_valid, weather_data, error = weather_service.fetch_weather_data(
             location_data['latitude'],
             location_data['longitude'],
@@ -133,6 +147,7 @@ def create_weather_record():
             end_date
         )
         if not is_valid:
+            print(f"Weather data fetch failed: {error}")
             return jsonify({'error': error}), 500
         
         try:
